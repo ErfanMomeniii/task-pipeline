@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package task;
+
+option go_package = "github.com/snapp/task-pipeline/proto";
+
+// TaskRequest represents a task sent from producer to consumer.
+message TaskRequest {
+  int32 type = 1;
+  int32 value = 2;
+}
+
+// TaskResponse is returned by the consumer after receiving a task.
+message TaskResponse {
+  int64 id = 1;
+  bool accepted = 2;
+}
+
+// TaskService defines the gRPC contract between producer and consumer.
+service TaskService {
+  rpc SubmitTask(TaskRequest) returns (TaskResponse);
+}
