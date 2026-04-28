@@ -140,7 +140,7 @@ const file_proto_task_proto_rawDesc = "" +
 	"\baccepted\x18\x02 \x01(\bR\baccepted2B\n" +
 	"\vTaskService\x123\n" +
 	"\n" +
-	"SubmitTask\x12\x11.task.TaskRequest\x1a\x12.task.TaskResponseB&Z$github.com/snapp/task-pipeline/protob\x06proto3"
+	"SubmitTask\x12\x11.task.TaskRequest\x1a\x12.task.TaskResponseB&Z$github.com/erfanmomeniii/task-pipeline/protob\x06proto3"
 
 var (
 	file_proto_task_proto_rawDescOnce sync.Once

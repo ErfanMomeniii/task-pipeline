@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package task;
 
-option go_package = "github.com/snapp/task-pipeline/proto";
+option go_package = "github.com/erfanmomeniii/task-pipeline/proto";
 
 // TaskRequest represents a task sent from producer to consumer.
 message TaskRequest {
