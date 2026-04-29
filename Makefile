@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags="-s -w -X main.version=$(VERSION)"
 
-.PHONY: all build build-producer build-consumer build-pgo test lint coverage clean proto migrate-up migrate-down up down logs pgo-collect
+.PHONY: all build build-producer build-consumer build-pgo test lint coverage clean proto migrate-up migrate-down up down logs pgo-collect flamegraph-producer flamegraph-consumer bench
 
 all: build
 
@@ -71,6 +71,31 @@ down:
 
 logs:
 	docker compose -f deploy/docker-compose.yml logs -f
+
+## Profiling -------------------------------------------------------------------
+
+PPROF_DURATION ?= 30
+
+flamegraph-producer:
+	@mkdir -p profiles
+	@echo "Collecting $(PPROF_DURATION)s CPU profile from producer (localhost:6060)..."
+	go tool pprof -http=:8090 "http://localhost:6060/debug/pprof/profile?seconds=$(PPROF_DURATION)"
+
+flamegraph-consumer:
+	@mkdir -p profiles
+	@echo "Collecting $(PPROF_DURATION)s CPU profile from consumer (localhost:6061)..."
+	go tool pprof -http=:8091 "http://localhost:6061/debug/pprof/profile?seconds=$(PPROF_DURATION)"
+
+heap-producer:
+	go tool pprof -http=:8090 "http://localhost:6060/debug/pprof/heap"
+
+heap-consumer:
+	go tool pprof -http=:8091 "http://localhost:6061/debug/pprof/heap"
+
+## Benchmark -------------------------------------------------------------------
+
+bench:
+	go test -bench=. -benchmem ./...
 
 ## Cleanup ---------------------------------------------------------------------
 
