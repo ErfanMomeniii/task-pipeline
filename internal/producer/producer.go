@@ -100,17 +100,23 @@ func (p *Producer) produce(ctx context.Context) error {
 		return fmt.Errorf("insert task: %w", err)
 	}
 
+	metrics.TasksProduced.Inc()
+
 	// Send to consumer via gRPC (include DB ID so consumer updates same row).
+	// If consumer is unavailable, the task stays in "received" state in DB.
+	// The consumer will process it when it comes online.
 	resp, err := p.client.SubmitTask(ctx, &pb.TaskRequest{
 		Id:    row.ID,
 		Type:  taskType,
 		Value: taskValue,
 	})
 	if err != nil {
-		return fmt.Errorf("submit task via grpc: %w", err)
+		p.log.Warn("consumer unavailable, task persisted in DB",
+			"id", row.ID,
+			"error", err,
+		)
+		return nil
 	}
-
-	metrics.TasksProduced.Inc()
 
 	p.log.Info("task produced",
 		"id", row.ID,

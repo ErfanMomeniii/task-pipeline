@@ -43,8 +43,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      consumer:
-        condition: service_started
 
   prometheus:
     image: prom/prometheus:v3.4.0

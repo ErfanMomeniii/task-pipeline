@@ -123,7 +123,7 @@ func TestProduce_BacklogLimitReached(t *testing.T) {
 	}
 }
 
-func TestProduce_GRPCFailure(t *testing.T) {
+func TestProduce_GRPCFailure_TaskStillPersisted(t *testing.T) {
 	store := db.NewMockStore()
 	mock := &mockGRPCClient{err: context.DeadlineExceeded}
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
@@ -136,15 +136,19 @@ func TestProduce_GRPCFailure(t *testing.T) {
 		maxBacklog:    100,
 	}
 
+	// Should NOT return error — task is persisted, gRPC failure is logged.
 	err := p.produce(context.Background())
-	if err == nil {
-		t.Fatal("expected error when gRPC fails")
+	if err != nil {
+		t.Fatalf("produce should not error on gRPC failure, got: %v", err)
 	}
 
-	// Task should still be inserted in DB (received state).
+	// Task should still be inserted in DB with "received" state.
 	tasks := store.GetAll()
 	if len(tasks) != 1 {
 		t.Fatalf("got %d tasks, want 1", len(tasks))
+	}
+	if tasks[0].State != string(db.TaskStateReceived) {
+		t.Errorf("state = %q, want received", tasks[0].State)
 	}
 }
 
