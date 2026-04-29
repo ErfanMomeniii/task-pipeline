@@ -22,10 +22,12 @@ const (
 )
 
 // TaskRequest represents a task sent from producer to consumer.
+// The id is the database primary key assigned by the producer on insert.
 type TaskRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Type          int32                  `protobuf:"varint,1,opt,name=type,proto3" json:"type,omitempty"`
-	Value         int32                  `protobuf:"varint,2,opt,name=value,proto3" json:"value,omitempty"`
+	Id            int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	Type          int32                  `protobuf:"varint,2,opt,name=type,proto3" json:"type,omitempty"`
+	Value         int32                  `protobuf:"varint,3,opt,name=value,proto3" json:"value,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -60,6 +62,13 @@ func (*TaskRequest) Descriptor() ([]byte, []int) {
 	return file_proto_task_proto_rawDescGZIP(), []int{0}
 }
 
+func (x *TaskRequest) GetId() int64 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
 func (x *TaskRequest) GetType() int32 {
 	if x != nil {
 		return x.Type
@@ -77,8 +86,7 @@ func (x *TaskRequest) GetValue() int32 {
 // TaskResponse is returned by the consumer after receiving a task.
 type TaskResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            int64                  `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
-	Accepted      bool                   `protobuf:"varint,2,opt,name=accepted,proto3" json:"accepted,omitempty"`
+	Accepted      bool                   `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -113,13 +121,6 @@ func (*TaskResponse) Descriptor() ([]byte, []int) {
 	return file_proto_task_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *TaskResponse) GetId() int64 {
-	if x != nil {
-		return x.Id
-	}
-	return 0
-}
-
 func (x *TaskResponse) GetAccepted() bool {
 	if x != nil {
 		return x.Accepted
@@ -131,13 +132,13 @@ var File_proto_task_proto protoreflect.FileDescriptor
 
 const file_proto_task_proto_rawDesc = "" +
 	"\n" +
-	"\x10proto/task.proto\x12\x04task\"7\n" +
-	"\vTaskRequest\x12\x12\n" +
-	"\x04type\x18\x01 \x01(\x05R\x04type\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x05R\x05value\":\n" +
-	"\fTaskResponse\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x1a\n" +
-	"\baccepted\x18\x02 \x01(\bR\baccepted2B\n" +
+	"\x10proto/task.proto\x12\x04task\"G\n" +
+	"\vTaskRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x12\n" +
+	"\x04type\x18\x02 \x01(\x05R\x04type\x12\x14\n" +
+	"\x05value\x18\x03 \x01(\x05R\x05value\"*\n" +
+	"\fTaskResponse\x12\x1a\n" +
+	"\baccepted\x18\x01 \x01(\bR\baccepted2B\n" +
 	"\vTaskService\x123\n" +
 	"\n" +
 	"SubmitTask\x12\x11.task.TaskRequest\x1a\x12.task.TaskResponseB.Z,github.com/erfanmomeniii/task-pipeline/protob\x06proto3"

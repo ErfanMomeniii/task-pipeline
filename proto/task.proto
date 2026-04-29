@@ -5,15 +5,16 @@ package task;
 option go_package = "github.com/erfanmomeniii/task-pipeline/proto";
 
 // TaskRequest represents a task sent from producer to consumer.
+// The id is the database primary key assigned by the producer on insert.
 message TaskRequest {
-  int32 type = 1;
-  int32 value = 2;
+  int64 id = 1;
+  int32 type = 2;
+  int32 value = 3;
 }
 
 // TaskResponse is returned by the consumer after receiving a task.
 message TaskResponse {
-  int64 id = 1;
-  bool accepted = 2;
+  bool accepted = 1;
 }
 
 // TaskService defines the gRPC contract between producer and consumer.

@@ -2,7 +2,6 @@ package consumer
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"strconv"
 	"sync"
@@ -41,36 +40,24 @@ func New(queries *db.Queries, rateLimit, ratePeriodMs int, log *slog.Logger) *Co
 }
 
 // SubmitTask handles incoming tasks from the producer.
+// The producer already persisted the task in DB with "received" state;
+// the consumer uses the provided ID to update the same row.
 func (c *Consumer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.TaskResponse, error) {
 	if !c.acquireToken() {
 		c.log.Warn("rate limit exceeded, rejecting task",
+			"id", req.Id,
 			"type", req.Type,
 			"value", req.Value,
 		)
-		return &pb.TaskResponse{Id: 0, Accepted: false}, nil
-	}
-
-	now := float64(time.Now().UnixMilli()) / 1000.0
-
-	// Insert task with "received" state (or it may already exist from producer).
-	// The consumer persists its own record to track processing.
-	row, err := c.queries.InsertTask(ctx, db.InsertTaskParams{
-		Type:           req.Type,
-		Value:          req.Value,
-		State:          string(db.TaskStateReceived),
-		CreationTime:   now,
-		LastUpdateTime: now,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("insert task: %w", err)
+		return &pb.TaskResponse{Accepted: false}, nil
 	}
 
 	metrics.TasksReceived.Inc()
 
 	// Process asynchronously so gRPC response returns quickly.
-	go c.process(row.ID, req.Type, req.Value)
+	go c.process(req.Id, req.Type, req.Value)
 
-	return &pb.TaskResponse{Id: row.ID, Accepted: true}, nil
+	return &pb.TaskResponse{Accepted: true}, nil
 }
 
 func (c *Consumer) process(id int64, taskType, taskValue int32) {

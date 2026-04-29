@@ -99,8 +99,9 @@ func (p *Producer) produce(ctx context.Context) error {
 		return fmt.Errorf("insert task: %w", err)
 	}
 
-	// Send to consumer via gRPC.
+	// Send to consumer via gRPC (include DB ID so consumer updates same row).
 	resp, err := p.client.SubmitTask(ctx, &pb.TaskRequest{
+		Id:    row.ID,
 		Type:  taskType,
 		Value: taskValue,
 	})
