@@ -175,6 +175,49 @@ func TestAcquireToken_Concurrent(t *testing.T) {
 	}
 }
 
+// FuzzAcquireToken verifies the rate limiter never grants more tokens than the
+// configured limit within a single period, regardless of input parameters.
+func FuzzAcquireToken(f *testing.F) {
+	f.Add(1, 100, 5)
+	f.Add(10, 1000, 50)
+	f.Add(100, 50, 200)
+	f.Add(1, 1, 1)
+
+	f.Fuzz(func(t *testing.T, rateLimit, ratePeriodMs, attempts int) {
+		// Bound inputs to sensible ranges.
+		if rateLimit <= 0 || rateLimit > 10000 {
+			return
+		}
+		if ratePeriodMs <= 0 || ratePeriodMs > 60000 {
+			return
+		}
+		if attempts <= 0 || attempts > 10000 {
+			return
+		}
+
+		c := &Consumer{
+			rateLimit:    rateLimit,
+			ratePeriodMs: ratePeriodMs,
+			tokens:       rateLimit,
+			lastTick:     time.Now(),
+		}
+
+		acquired := 0
+		for range attempts {
+			if c.acquireToken() {
+				acquired++
+			}
+		}
+
+		// Should never grant more than rateLimit tokens in a single period
+		// (unless time passes and triggers a refill, but in a tight loop
+		// with short durations this is extremely unlikely).
+		if acquired > rateLimit+1 { // +1 tolerance for clock edge
+			t.Errorf("acquired %d tokens with limit %d", acquired, rateLimit)
+		}
+	})
+}
+
 func TestNew(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 	c := New(db.NewMockStore(), 5, 2000, log)
