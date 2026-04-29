@@ -114,6 +114,33 @@ func (c *Consumer) process(id int64, taskType, taskValue int32) {
 	)
 }
 
+// StartStateTracker periodically queries the DB for task state counts
+// and updates the tasks_by_state Prometheus gauge. Runs until ctx is cancelled.
+func (c *Consumer) StartStateTracker(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			for _, state := range []string{
+				string(db.TaskStateReceived),
+				string(db.TaskStateProcessing),
+				string(db.TaskStateDone),
+			} {
+				count, err := c.store.CountTasksByState(ctx, state)
+				if err != nil {
+					c.log.Error("count tasks by state failed", "state", state, "error", err)
+					continue
+				}
+				metrics.TasksByState.WithLabelValues(state).Set(float64(count))
+			}
+		}
+	}
+}
+
 // acquireToken implements a simple token bucket rate limiter.
 func (c *Consumer) acquireToken() bool {
 	c.mu.Lock()

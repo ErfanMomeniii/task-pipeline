@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/erfanmomeniii/task-pipeline/internal/config"
 	"github.com/erfanmomeniii/task-pipeline/internal/consumer"
@@ -96,6 +97,9 @@ func run(cfgPath string) error {
 	srv := grpc.NewServer()
 	c := consumer.New(queries, cfg.Consumer.RateLimit, cfg.Consumer.RatePeriodMs, log)
 	pb.RegisterTaskServiceServer(srv, c)
+
+	// Periodically update tasks_by_state gauge from DB (every 5s).
+	go c.StartStateTracker(ctx, 5*time.Second)
 
 	log.Info("consumer starting",
 		"version", version,

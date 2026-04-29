@@ -22,6 +22,14 @@ var (
 	})
 )
 
+// Shared metrics (used by both services).
+var (
+	TasksByState = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "tasks_by_state",
+		Help: "Current number of tasks in each state (received, processing, done).",
+	}, []string{"state"})
+)
+
 // Consumer metrics.
 var (
 	TasksReceived = prometheus.NewCounter(prometheus.CounterOpts{
@@ -56,6 +64,7 @@ func RegisterProducer() {
 	prometheus.MustRegister(
 		TasksProduced,
 		BacklogGauge,
+		TasksByState,
 	)
 }
 
@@ -67,6 +76,7 @@ func RegisterConsumer() {
 		TasksPerType,
 		ValueSumPerType,
 		ProcessingDuration,
+		TasksByState,
 	)
 }
 
