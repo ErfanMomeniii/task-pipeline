@@ -108,11 +108,14 @@ func run(cfgPath string) error {
 		"rate_period_ms", cfg.Consumer.RatePeriodMs,
 	)
 
-	// Graceful shutdown.
+	// Graceful shutdown: stop accepting new RPCs, then wait for in-flight tasks.
 	go func() {
 		<-ctx.Done()
 		log.Info("shutting down gRPC server")
 		srv.GracefulStop()
+		log.Info("waiting for in-flight tasks to complete")
+		c.Wait()
+		log.Info("all tasks completed, shutdown done")
 	}()
 
 	if err := srv.Serve(lis); err != nil {

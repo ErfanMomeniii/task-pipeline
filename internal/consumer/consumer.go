@@ -25,6 +25,9 @@ type Consumer struct {
 	mu       sync.Mutex
 	tokens   int
 	lastTick time.Time
+
+	// Tracks in-flight process goroutines for graceful shutdown.
+	wg sync.WaitGroup
 }
 
 // New creates a Consumer with rate limiting configuration.
@@ -55,7 +58,12 @@ func (c *Consumer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.Tas
 	metrics.TasksReceived.Inc()
 
 	// Process asynchronously so gRPC response returns quickly.
-	go c.process(req.Id, req.Type, req.Value)
+	// WaitGroup ensures graceful shutdown waits for in-flight tasks.
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		c.process(req.Id, req.Type, req.Value)
+	}()
 
 	return &pb.TaskResponse{Accepted: true}, nil
 }
@@ -112,6 +120,12 @@ func (c *Consumer) process(id int64, taskType, taskValue int32) {
 		"duration_ms", taskValue,
 		"total_sum_for_type", totalSum,
 	)
+}
+
+// Wait blocks until all in-flight process goroutines complete.
+// Call this during graceful shutdown after stopping the gRPC server.
+func (c *Consumer) Wait() {
+	c.wg.Wait()
 }
 
 // StartStateTracker periodically queries the DB for task state counts
