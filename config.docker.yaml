@@ -1,0 +1,27 @@
+db:
+  host: postgres
+  port: 5432
+  user: taskpipeline
+  password: taskpipeline
+  name: taskpipeline
+  sslmode: disable
+
+log:
+  level: info
+  format: json
+
+grpc:
+  host: consumer
+  port: 50051
+
+producer:
+  prometheus_port: 9090
+  pprof_port: 6060
+  rate_ms: 500
+  max_backlog: 100
+
+consumer:
+  prometheus_port: 9091
+  pprof_port: 6061
+  rate_limit: 10
+  rate_period_ms: 1000

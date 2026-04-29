@@ -1,0 +1,37 @@
+{
+  "uid": "tasks-per-type",
+  "title": "Processed Tasks per Type",
+  "tags": ["task-pipeline"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Total Processed Tasks per Type",
+      "type": "bargauge",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "consumer_tasks_per_type_total",
+          "legendFormat": "type {{type}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Tasks per Type Over Time",
+      "type": "timeseries",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "consumer_tasks_per_type_total",
+          "legendFormat": "type {{type}}"
+        }
+      ]
+    }
+  ]
+}

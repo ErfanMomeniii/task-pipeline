@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags="-s -w -X main.version=$(VERSION)"
 
-.PHONY: all build build-producer build-consumer test lint coverage clean proto migrate-up migrate-down
+.PHONY: all build build-producer build-consumer test lint coverage clean proto migrate-up migrate-down up down logs
 
 all: build
 
@@ -43,6 +43,17 @@ migrate-up:
 
 migrate-down:
 	migrate -database "$(MIGRATE_DSN)" -path migrations down
+
+## Docker ----------------------------------------------------------------------
+
+up:
+	docker compose -f deploy/docker-compose.yml up --build -d
+
+down:
+	docker compose -f deploy/docker-compose.yml down -v
+
+logs:
+	docker compose -f deploy/docker-compose.yml logs -f
 
 ## Cleanup ---------------------------------------------------------------------
 

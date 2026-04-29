@@ -1,0 +1,75 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: taskpipeline
+      POSTGRES_PASSWORD: taskpipeline
+      POSTGRES_DB: taskpipeline
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taskpipeline"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  consumer:
+    build:
+      context: ..
+      dockerfile: Dockerfile.consumer
+    command: ["--config", "/etc/task-pipeline/config.yaml"]
+    volumes:
+      - ../config.docker.yaml:/etc/task-pipeline/config.yaml:ro
+    ports:
+      - "9091:9091"
+      - "6061:6061"
+      - "50051:50051"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  producer:
+    build:
+      context: ..
+      dockerfile: Dockerfile.producer
+    command: ["--config", "/etc/task-pipeline/config.yaml"]
+    volumes:
+      - ../config.docker.yaml:/etc/task-pipeline/config.yaml:ro
+    ports:
+      - "9090:9090"
+      - "6060:6060"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      consumer:
+        condition: service_started
+
+  prometheus:
+    image: prom/prometheus:v3.4.0
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9092:9090"
+    depends_on:
+      - producer
+      - consumer
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  pgdata:

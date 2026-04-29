@@ -1,0 +1,71 @@
+{
+  "uid": "messages-per-state",
+  "title": "Messages per State",
+  "tags": ["task-pipeline"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Tasks Received (total)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "consumer_tasks_received_total",
+          "legendFormat": "received"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Tasks Processing (in-flight)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "consumer_tasks_received_total - consumer_tasks_done_total",
+          "legendFormat": "processing"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Tasks Done (total)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "consumer_tasks_done_total",
+          "legendFormat": "done"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Messages per State Over Time",
+      "type": "timeseries",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "consumer_tasks_received_total",
+          "legendFormat": "received"
+        },
+        {
+          "expr": "consumer_tasks_received_total - consumer_tasks_done_total",
+          "legendFormat": "processing"
+        },
+        {
+          "expr": "consumer_tasks_done_total",
+          "legendFormat": "done"
+        }
+      ]
+    }
+  ]
+}
