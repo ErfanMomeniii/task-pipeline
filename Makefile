@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags="-s -w -X main.version=$(VERSION)"
 
-.PHONY: all build build-producer build-consumer test lint coverage clean proto migrate-up migrate-down up down logs
+.PHONY: all build build-producer build-consumer build-pgo test lint coverage clean proto migrate-up migrate-down up down logs pgo-collect
 
 all: build
 
@@ -14,6 +14,23 @@ build-producer:
 
 build-consumer:
 	go build $(LDFLAGS) -o bin/consumer ./cmd/consumer
+
+## PGO (Profile-Guided Optimization) ------------------------------------------
+
+PGO_DURATION ?= 30
+
+pgo-collect:
+	@echo "Collecting CPU profiles for $(PGO_DURATION)s..."
+	@mkdir -p profiles
+	curl -s "http://localhost:6060/debug/pprof/profile?seconds=$(PGO_DURATION)" -o profiles/producer.pprof &
+	curl -s "http://localhost:6061/debug/pprof/profile?seconds=$(PGO_DURATION)" -o profiles/consumer.pprof &
+	wait
+	@echo "Profiles saved to profiles/"
+
+build-pgo: pgo-collect
+	go build -pgo=profiles/producer.pprof $(LDFLAGS) -o bin/producer ./cmd/producer
+	go build -pgo=profiles/consumer.pprof $(LDFLAGS) -o bin/consumer ./cmd/consumer
+	@echo "PGO-optimized binaries built in bin/"
 
 ## Quality ---------------------------------------------------------------------
 
@@ -58,4 +75,4 @@ logs:
 ## Cleanup ---------------------------------------------------------------------
 
 clean:
-	rm -rf bin/ coverage.out coverage.html
+	rm -rf bin/ profiles/ coverage.out coverage.html

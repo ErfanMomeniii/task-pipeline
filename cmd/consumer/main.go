@@ -23,6 +23,12 @@ import (
 var version = "dev"
 
 func main() {
+	// Spec requires: ./consumer -version
+	if len(os.Args) > 1 && os.Args[1] == "-version" {
+		fmt.Println(version)
+		return
+	}
+
 	var cfgPath string
 
 	root := &cobra.Command{
@@ -34,14 +40,6 @@ func main() {
 	}
 
 	root.Flags().StringVar(&cfgPath, "config", "", "path to config file")
-
-	root.AddCommand(&cobra.Command{
-		Use:   "version",
-		Short: "Print build version",
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(version)
-		},
-	})
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

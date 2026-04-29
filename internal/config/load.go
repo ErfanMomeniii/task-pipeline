@@ -29,7 +29,7 @@ func Load(path string) (*Config, error) {
 
 	v.SetDefault("producer.prometheus_port", 9090)
 	v.SetDefault("producer.pprof_port", 6060)
-	v.SetDefault("producer.rate_ms", 500)
+	v.SetDefault("producer.rate_per_second", 2)
 	v.SetDefault("producer.max_backlog", 100)
 
 	v.SetDefault("consumer.prometheus_port", 9091)

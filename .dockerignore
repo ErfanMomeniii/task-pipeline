@@ -1,0 +1,12 @@
+bin/
+.git/
+.github/
+.idea/
+.vscode/
+.claude/
+.qodo/
+.env
+*.out
+*.test
+coverage.*
+deploy/

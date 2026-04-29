@@ -17,7 +17,7 @@ grpc:
 producer:
   prometheus_port: 9090
   pprof_port: 6060
-  rate_ms: 500
+  rate_per_second: 2
   max_backlog: 100
 
 consumer:

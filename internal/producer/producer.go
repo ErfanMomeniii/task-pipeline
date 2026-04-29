@@ -16,38 +16,39 @@ import (
 
 // Producer generates tasks and sends them to the consumer via gRPC.
 type Producer struct {
-	queries    *db.Queries
-	client     pb.TaskServiceClient
-	conn       *grpc.ClientConn
-	log        *slog.Logger
-	rateMs     int
-	maxBacklog int
+	queries       *db.Queries
+	client        pb.TaskServiceClient
+	conn          *grpc.ClientConn
+	log           *slog.Logger
+	ratePerSecond int
+	maxBacklog    int
 }
 
 // New creates a Producer that connects to the consumer gRPC server.
-func New(ctx context.Context, queries *db.Queries, grpcAddr string, rateMs, maxBacklog int, log *slog.Logger) (*Producer, error) {
+func New(ctx context.Context, queries *db.Queries, grpcAddr string, ratePerSecond, maxBacklog int, log *slog.Logger) (*Producer, error) {
 	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, fmt.Errorf("grpc dial %s: %w", grpcAddr, err)
 	}
 
 	return &Producer{
-		queries:    queries,
-		client:     pb.NewTaskServiceClient(conn),
-		conn:       conn,
-		log:        log,
-		rateMs:     rateMs,
-		maxBacklog: maxBacklog,
+		queries:       queries,
+		client:        pb.NewTaskServiceClient(conn),
+		conn:          conn,
+		log:           log,
+		ratePerSecond: ratePerSecond,
+		maxBacklog:    maxBacklog,
 	}, nil
 }
 
 // Run starts the production loop. It blocks until ctx is cancelled.
 func (p *Producer) Run(ctx context.Context) error {
-	ticker := time.NewTicker(time.Duration(p.rateMs) * time.Millisecond)
+	interval := time.Second / time.Duration(p.ratePerSecond)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	p.log.Info("producer loop started",
-		"rate_ms", p.rateMs,
+		"rate_per_second", p.ratePerSecond,
 		"max_backlog", p.maxBacklog,
 	)
 

@@ -1,14 +1,20 @@
 package metrics
 
 import (
+	"bytes"
+	"context"
+	"fmt"
+	"log/slog"
+	"net"
+	"net/http"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-func TestRegisterProducer(t *testing.T) {
-	// Use a fresh registry to avoid conflicts with other tests.
+func TestProducerMetrics(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(TasksProduced, BacklogGauge)
 
@@ -24,7 +30,7 @@ func TestRegisterProducer(t *testing.T) {
 	}
 }
 
-func TestRegisterConsumer(t *testing.T) {
+func TestConsumerMetrics(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(TasksReceived, TasksDone, TasksPerType, ValueSumPerType, ProcessingDuration)
 
@@ -47,5 +53,40 @@ func TestRegisterConsumer(t *testing.T) {
 		t.Errorf("ValueSumPerType[3] = %v, want 42", got)
 	}
 
-	_ = reg // keep registry reference
+	_ = reg
+}
+
+func TestServe(t *testing.T) {
+	// Find a free port.
+	lis, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := lis.Addr().(*net.TCPAddr).Port
+	lis.Close()
+
+	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+
+	// Start metrics server in background.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = Serve(port, log)
+	}()
+
+	// Wait briefly for server to start, then check /metrics endpoint.
+	time.Sleep(50 * time.Millisecond)
+
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/metrics", port))
+	if err != nil {
+		t.Fatalf("GET /metrics: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+
+	_ = ctx
 }

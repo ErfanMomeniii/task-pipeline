@@ -32,7 +32,7 @@ type GRPCConfig struct {
 type ProducerConfig struct {
 	PrometheusPort int `mapstructure:"prometheus_port"`
 	PprofPort      int `mapstructure:"pprof_port"`
-	RateMs         int `mapstructure:"rate_ms"`
+	RatePerSecond  int `mapstructure:"rate_per_second"`
 	MaxBacklog     int `mapstructure:"max_backlog"`
 }
 

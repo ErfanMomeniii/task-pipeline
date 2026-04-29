@@ -20,6 +20,12 @@ import (
 var version = "dev"
 
 func main() {
+	// Spec requires: ./producer -version
+	if len(os.Args) > 1 && os.Args[1] == "-version" {
+		fmt.Println(version)
+		return
+	}
+
 	var cfgPath string
 
 	root := &cobra.Command{
@@ -31,14 +37,6 @@ func main() {
 	}
 
 	root.Flags().StringVar(&cfgPath, "config", "", "path to config file")
-
-	root.AddCommand(&cobra.Command{
-		Use:   "version",
-		Short: "Print build version",
-		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println(version)
-		},
-	})
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -87,7 +85,7 @@ func run(cfgPath string) error {
 
 	// Producer
 	grpcAddr := fmt.Sprintf("%s:%d", cfg.GRPC.Host, cfg.GRPC.Port)
-	p, err := producer.New(ctx, queries, grpcAddr, cfg.Producer.RateMs, cfg.Producer.MaxBacklog, log)
+	p, err := producer.New(ctx, queries, grpcAddr, cfg.Producer.RatePerSecond, cfg.Producer.MaxBacklog, log)
 	if err != nil {
 		return fmt.Errorf("create producer: %w", err)
 	}
@@ -96,7 +94,7 @@ func run(cfgPath string) error {
 	log.Info("producer starting",
 		"version", version,
 		"grpc_addr", grpcAddr,
-		"rate_ms", cfg.Producer.RateMs,
+		"rate_per_second", cfg.Producer.RatePerSecond,
 		"max_backlog", cfg.Producer.MaxBacklog,
 	)
 
