@@ -117,7 +117,7 @@ func (c *Consumer) process(id int64, taskType, taskValue int32) {
 		"id", id,
 		"type", taskType,
 		"value", taskValue,
-		"duration_ms", taskValue,
+		"duration_ms", duration*1000,
 		"total_sum_for_type", totalSum,
 	)
 }

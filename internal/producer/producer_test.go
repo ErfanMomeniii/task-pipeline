@@ -152,6 +152,27 @@ func TestProduce_GRPCFailure_TaskStillPersisted(t *testing.T) {
 	}
 }
 
+func BenchmarkProduce(b *testing.B) {
+	store := db.NewMockStore()
+	mock := &mockGRPCClient{accepted: true}
+	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+
+	p := &Producer{
+		store:         store,
+		client:        mock,
+		log:           log,
+		ratePerSecond: 10,
+		maxBacklog:    b.N + 1,
+	}
+
+	b.ResetTimer()
+	for range b.N {
+		if err := p.produce(context.Background()); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // mockGRPCClient implements pb.TaskServiceClient for testing.
 type mockGRPCClient struct {
 	accepted bool

@@ -218,6 +218,42 @@ func FuzzAcquireToken(f *testing.F) {
 	})
 }
 
+// BenchmarkAcquireToken measures the throughput of the rate limiter under contention.
+func BenchmarkAcquireToken(b *testing.B) {
+	c := &Consumer{
+		rateLimit:    1000,
+		ratePeriodMs: 1000,
+		tokens:       1000,
+		lastTick:     time.Now(),
+	}
+
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			c.acquireToken()
+		}
+	})
+}
+
+// BenchmarkProcess measures end-to-end process with 1ms sleep.
+func BenchmarkProcess(b *testing.B) {
+	store := db.NewMockStore()
+	c := newTestConsumer(store, 100000, 1000)
+
+	// Pre-insert tasks.
+	for i := range b.N {
+		store.InsertTask(context.Background(), db.InsertTaskParams{
+			Type: int32(i % 10), Value: 1, State: string(db.TaskStateReceived),
+			CreationTime: 1000, LastUpdateTime: 1000,
+		})
+	}
+
+	b.ResetTimer()
+	for i := range b.N {
+		c.process(int64(i+1), int32(i%10), 1) // 1ms sleep
+	}
+}
+
 func TestNew(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 	c := New(db.NewMockStore(), 5, 2000, log)

@@ -28,7 +28,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "consumer_tasks_per_type_total",
+          "expr": "increase(consumer_tasks_per_type_total[1m])",
           "legendFormat": "type {{type}}"
         }
       ]
