@@ -3,12 +3,14 @@ package consumer
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/erfanmomeniii/task-pipeline/internal/db"
+	"github.com/erfanmomeniii/task-pipeline/internal/models"
 	pb "github.com/erfanmomeniii/task-pipeline/proto"
 )
 
@@ -67,7 +69,7 @@ func TestProcess_StateTransitions(t *testing.T) {
 
 	// Pre-insert a task (simulates what producer does).
 	task, err := store.InsertTask(context.Background(), db.InsertTaskParams{
-		Type: 5, Value: 10, State: string(db.TaskStateReceived),
+		Type: 5, Value: 10, State: string(models.TaskStateReceived),
 		CreationTime: 1000, LastUpdateTime: 1000,
 	})
 	if err != nil {
@@ -82,8 +84,8 @@ func TestProcess_StateTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.State != string(db.TaskStateDone) {
-		t.Errorf("state = %q, want %q", got.State, db.TaskStateDone)
+	if got.State != string(models.TaskStateDone) {
+		t.Errorf("state = %q, want %q", got.State, models.TaskStateDone)
 	}
 }
 
@@ -92,7 +94,7 @@ func TestProcess_SleepDuration(t *testing.T) {
 	c := newTestConsumer(store, 100, 1000)
 
 	task, _ := store.InsertTask(context.Background(), db.InsertTaskParams{
-		Type: 1, Value: 50, State: string(db.TaskStateReceived),
+		Type: 1, Value: 50, State: string(models.TaskStateReceived),
 		CreationTime: 1000, LastUpdateTime: 1000,
 	})
 
@@ -103,6 +105,48 @@ func TestProcess_SleepDuration(t *testing.T) {
 	// Should have slept ~50ms.
 	if elapsed < 40*time.Millisecond {
 		t.Errorf("process took %v, expected >= 40ms", elapsed)
+	}
+}
+
+func TestProcess_UpdateToProcessingFails(t *testing.T) {
+	store := db.NewMockStore()
+	c := newTestConsumer(store, 100, 1000)
+
+	task, _ := store.InsertTask(context.Background(), db.InsertTaskParams{
+		Type: 0, Value: 1, State: string(models.TaskStateReceived),
+		CreationTime: 1000, LastUpdateTime: 1000,
+	})
+
+	// Inject error on UpdateTaskState.
+	store.UpdateErr = fmt.Errorf("db connection lost")
+
+	c.process(task.ID, task.Type, task.Value)
+
+	// Task should remain in "received" state since update failed.
+	got, _ := store.GetTask(context.Background(), task.ID)
+	if got.State != string(models.TaskStateReceived) {
+		t.Errorf("state = %q, want %q (update failed, should not change)", got.State, models.TaskStateReceived)
+	}
+}
+
+func TestProcess_SumValueByTypeFails(t *testing.T) {
+	store := db.NewMockStore()
+	c := newTestConsumer(store, 100, 1000)
+
+	task, _ := store.InsertTask(context.Background(), db.InsertTaskParams{
+		Type: 0, Value: 1, State: string(models.TaskStateReceived),
+		CreationTime: 1000, LastUpdateTime: 1000,
+	})
+
+	// Inject error on SumValueByType.
+	store.SumValueErr = fmt.Errorf("query timeout")
+
+	c.process(task.ID, task.Type, task.Value)
+
+	// Task should still reach "done" state — sum query failure is non-fatal to state.
+	got, _ := store.GetTask(context.Background(), task.ID)
+	if got.State != string(models.TaskStateDone) {
+		t.Errorf("state = %q, want %q", got.State, models.TaskStateDone)
 	}
 }
 
@@ -175,6 +219,69 @@ func TestAcquireToken_Concurrent(t *testing.T) {
 	}
 }
 
+func TestStartStateTracker_ContextCancellation(t *testing.T) {
+	store := db.NewMockStore()
+	c := newTestConsumer(store, 100, 1000)
+
+	// Pre-insert tasks in different states.
+	store.InsertTask(context.Background(), db.InsertTaskParams{
+		Type: 0, Value: 10, State: string(models.TaskStateReceived),
+		CreationTime: 1000, LastUpdateTime: 1000,
+	})
+	store.InsertTask(context.Background(), db.InsertTaskParams{
+		Type: 1, Value: 20, State: string(models.TaskStateDone),
+		CreationTime: 1000, LastUpdateTime: 1000,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+
+	// Run tracker with a short interval; it should complete when context expires.
+	done := make(chan struct{})
+	go func() {
+		c.StartStateTracker(ctx, 50*time.Millisecond)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Tracker stopped as expected.
+	case <-time.After(2 * time.Second):
+		t.Fatal("StartStateTracker did not stop after context cancellation")
+	}
+}
+
+func TestWait_CompletesAfterProcessing(t *testing.T) {
+	store := db.NewMockStore()
+	c := newTestConsumer(store, 100, 1000)
+
+	task, _ := store.InsertTask(context.Background(), db.InsertTaskParams{
+		Type: 0, Value: 10, State: string(models.TaskStateReceived),
+		CreationTime: 1000, LastUpdateTime: 1000,
+	})
+
+	// Simulate what SubmitTask does: wg.Add + goroutine.
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		c.process(task.ID, task.Type, task.Value)
+	}()
+
+	// Wait should return after the goroutine finishes (~10ms sleep).
+	done := make(chan struct{})
+	go func() {
+		c.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Wait returned as expected.
+	case <-time.After(2 * time.Second):
+		t.Fatal("Wait did not return after in-flight task completed")
+	}
+}
+
 // FuzzAcquireToken verifies the rate limiter never grants more tokens than the
 // configured limit within a single period, regardless of input parameters.
 func FuzzAcquireToken(f *testing.F) {
@@ -243,7 +350,7 @@ func BenchmarkProcess(b *testing.B) {
 	// Pre-insert tasks.
 	for i := range b.N {
 		store.InsertTask(context.Background(), db.InsertTaskParams{
-			Type: int32(i % 10), Value: 1, State: string(db.TaskStateReceived),
+			Type: int32(i % 10), Value: 1, State: string(models.TaskStateReceived),
 			CreationTime: 1000, LastUpdateTime: 1000,
 		})
 	}

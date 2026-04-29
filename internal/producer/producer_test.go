@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/erfanmomeniii/task-pipeline/internal/db"
+	"github.com/erfanmomeniii/task-pipeline/internal/models"
 	pb "github.com/erfanmomeniii/task-pipeline/proto"
 	"google.golang.org/grpc"
 )
@@ -70,7 +71,7 @@ func TestProduce_InsertsAndSends(t *testing.T) {
 	}
 
 	task := tasks[0]
-	if task.State != string(db.TaskStateReceived) {
+	if task.State != string(models.TaskStateReceived) {
 		t.Errorf("state = %q, want received", task.State)
 	}
 	if task.Type < 0 || task.Type > 9 {
@@ -93,7 +94,7 @@ func TestProduce_BacklogLimitReached(t *testing.T) {
 	// Pre-fill store with 5 unprocessed tasks.
 	for range 5 {
 		store.InsertTask(context.Background(), db.InsertTaskParams{
-			Type: 0, Value: 10, State: string(db.TaskStateReceived),
+			Type: 0, Value: 10, State: string(models.TaskStateReceived),
 			CreationTime: 1000, LastUpdateTime: 1000,
 		})
 	}
@@ -147,8 +148,41 @@ func TestProduce_GRPCFailure_TaskStillPersisted(t *testing.T) {
 	if len(tasks) != 1 {
 		t.Fatalf("got %d tasks, want 1", len(tasks))
 	}
-	if tasks[0].State != string(db.TaskStateReceived) {
+	if tasks[0].State != string(models.TaskStateReceived) {
 		t.Errorf("state = %q, want received", tasks[0].State)
+	}
+}
+
+func TestProduce_ConsumerRejects(t *testing.T) {
+	store := db.NewMockStore()
+	mock := &mockGRPCClient{accepted: false} // consumer rate-limits
+	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+
+	p := &Producer{
+		store:         store,
+		client:        mock,
+		log:           log,
+		ratePerSecond: 10,
+		maxBacklog:    100,
+	}
+
+	err := p.produce(context.Background())
+	if err != nil {
+		t.Fatalf("produce should not error when consumer rejects, got: %v", err)
+	}
+
+	// Task should still be persisted in DB.
+	tasks := store.GetAll()
+	if len(tasks) != 1 {
+		t.Fatalf("got %d tasks, want 1", len(tasks))
+	}
+	if tasks[0].State != string(models.TaskStateReceived) {
+		t.Errorf("state = %q, want received", tasks[0].State)
+	}
+
+	// gRPC was called.
+	if mock.calls != 1 {
+		t.Errorf("gRPC calls = %d, want 1", mock.calls)
 	}
 }
 

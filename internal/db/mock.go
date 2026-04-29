@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"sync/atomic"
+
+	"github.com/erfanmomeniii/task-pipeline/internal/models"
 )
 
 // MockStore is a test mock implementing TaskStore.
@@ -15,6 +17,7 @@ type MockStore struct {
 	// Optional error injection.
 	InsertErr      error
 	UpdateErr      error
+	SumValueErr    error
 	SumValueResult int64
 }
 
@@ -89,7 +92,7 @@ func (m *MockStore) CountUnprocessed(_ context.Context) (int64, error) {
 
 	var count int64
 	for _, t := range m.tasks {
-		if t.State != string(TaskStateDone) {
+		if t.State != string(models.TaskStateDone) {
 			count++
 		}
 	}
@@ -97,6 +100,9 @@ func (m *MockStore) CountUnprocessed(_ context.Context) (int64, error) {
 }
 
 func (m *MockStore) SumValueByType(_ context.Context, type_ int32) (int64, error) {
+	if m.SumValueErr != nil {
+		return 0, m.SumValueErr
+	}
 	if m.SumValueResult != 0 {
 		return m.SumValueResult, nil
 	}
@@ -106,7 +112,7 @@ func (m *MockStore) SumValueByType(_ context.Context, type_ int32) (int64, error
 
 	var sum int64
 	for _, t := range m.tasks {
-		if t.Type == type_ && t.State == string(TaskStateDone) {
+		if t.Type == type_ && t.State == string(models.TaskStateDone) {
 			sum += int64(t.Value)
 		}
 	}
@@ -119,7 +125,7 @@ func (m *MockStore) CountDoneByType(_ context.Context, type_ int32) (int64, erro
 
 	var count int64
 	for _, t := range m.tasks {
-		if t.Type == type_ && t.State == string(TaskStateDone) {
+		if t.Type == type_ && t.State == string(models.TaskStateDone) {
 			count++
 		}
 	}

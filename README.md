@@ -125,7 +125,8 @@ task-pipeline/
 │   └── consumer/main.go         # Consumer CLI entry point (Cobra)
 ├── internal/
 │   ├── config/                  # Shared Viper config loading (YAML + env + defaults)
-│   ├── db/                      # Shared persistence (sqlc generated code + connection + migrations + domain types)
+│   ├── db/                      # Shared persistence (sqlc generated code + connection + migrations)
+│   ├── models/                  # Domain types (TaskState constants) shared across services
 │   ├── metrics/                 # Prometheus metrics definitions + HTTP server
 │   ├── logger/                  # slog wrapper (configurable level + format)
 │   ├── producer/                # Producer business logic (generation loop, backlog control)
@@ -146,7 +147,8 @@ task-pipeline/
 
 ### Design decisions on shared code
 
-- **`internal/db/`** is the shared persistence package — both services import the same sqlc-generated queries, connection logic, and domain types (`Task`, `TaskState`). This ensures a single source of truth for the database schema and avoids drift between producer and consumer.
+- **`internal/models/`** defines domain types (`TaskState` constants) used across both services — single source of truth for state values.
+- **`internal/db/`** is the shared persistence package — both services import the same sqlc-generated queries and connection logic. This ensures a single source of truth for the database schema and avoids drift between producer and consumer.
 - **`internal/config/`** provides a shared config struct — each service loads the full config but uses only its relevant section.
 - **`migrations/`** lives at the project root with an `embed.go` file that exposes `migrations.FS`. The `internal/db` package imports this to run embedded migrations at startup — no external migration files needed at runtime.
 - **No `pkg/` directory** — there are no external consumers, so everything stays in `internal/`.

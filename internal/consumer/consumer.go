@@ -9,6 +9,7 @@ import (
 
 	"github.com/erfanmomeniii/task-pipeline/internal/db"
 	"github.com/erfanmomeniii/task-pipeline/internal/metrics"
+	"github.com/erfanmomeniii/task-pipeline/internal/models"
 	pb "github.com/erfanmomeniii/task-pipeline/proto"
 )
 
@@ -77,7 +78,7 @@ func (c *Consumer) process(id int64, taskType, taskValue int32) {
 	// Set state to "processing".
 	if err := c.store.UpdateTaskState(ctx, db.UpdateTaskStateParams{
 		ID:             id,
-		State:          string(db.TaskStateProcessing),
+		State:          string(models.TaskStateProcessing),
 		LastUpdateTime: now(),
 	}); err != nil {
 		c.log.Error("update to processing failed", "id", id, "error", err)
@@ -92,7 +93,7 @@ func (c *Consumer) process(id int64, taskType, taskValue int32) {
 	// Set state to "done".
 	if err := c.store.UpdateTaskState(ctx, db.UpdateTaskStateParams{
 		ID:             id,
-		State:          string(db.TaskStateDone),
+		State:          string(models.TaskStateDone),
 		LastUpdateTime: now(),
 	}); err != nil {
 		c.log.Error("update to done failed", "id", id, "error", err)
@@ -140,9 +141,9 @@ func (c *Consumer) StartStateTracker(ctx context.Context, interval time.Duration
 			return
 		case <-ticker.C:
 			for _, state := range []string{
-				string(db.TaskStateReceived),
-				string(db.TaskStateProcessing),
-				string(db.TaskStateDone),
+				string(models.TaskStateReceived),
+				string(models.TaskStateProcessing),
+				string(models.TaskStateDone),
 			} {
 				count, err := c.store.CountTasksByState(ctx, state)
 				if err != nil {

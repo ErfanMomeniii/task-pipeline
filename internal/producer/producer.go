@@ -9,6 +9,7 @@ import (
 
 	"github.com/erfanmomeniii/task-pipeline/internal/db"
 	"github.com/erfanmomeniii/task-pipeline/internal/metrics"
+	"github.com/erfanmomeniii/task-pipeline/internal/models"
 	pb "github.com/erfanmomeniii/task-pipeline/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -92,7 +93,7 @@ func (p *Producer) produce(ctx context.Context) error {
 	row, err := p.store.InsertTask(ctx, db.InsertTaskParams{
 		Type:           taskType,
 		Value:          taskValue,
-		State:          string(db.TaskStateReceived),
+		State:          string(models.TaskStateReceived),
 		CreationTime:   now,
 		LastUpdateTime: now,
 	})
