@@ -16,7 +16,7 @@ import (
 
 // Producer generates tasks and sends them to the consumer via gRPC.
 type Producer struct {
-	queries       *db.Queries
+	store         db.TaskStore
 	client        pb.TaskServiceClient
 	conn          *grpc.ClientConn
 	log           *slog.Logger
@@ -25,14 +25,14 @@ type Producer struct {
 }
 
 // New creates a Producer that connects to the consumer gRPC server.
-func New(ctx context.Context, queries *db.Queries, grpcAddr string, ratePerSecond, maxBacklog int, log *slog.Logger) (*Producer, error) {
+func New(ctx context.Context, store db.TaskStore, grpcAddr string, ratePerSecond, maxBacklog int, log *slog.Logger) (*Producer, error) {
 	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, fmt.Errorf("grpc dial %s: %w", grpcAddr, err)
 	}
 
 	return &Producer{
-		queries:       queries,
+		store:         store,
 		client:        pb.NewTaskServiceClient(conn),
 		conn:          conn,
 		log:           log,
@@ -72,7 +72,7 @@ func (p *Producer) Close() error {
 
 func (p *Producer) produce(ctx context.Context) error {
 	// Check backlog before producing.
-	unprocessed, err := p.queries.CountUnprocessed(ctx)
+	unprocessed, err := p.store.CountUnprocessed(ctx)
 	if err != nil {
 		return fmt.Errorf("count unprocessed: %w", err)
 	}
@@ -89,7 +89,7 @@ func (p *Producer) produce(ctx context.Context) error {
 	now := float64(time.Now().UnixMilli()) / 1000.0
 
 	// Persist task with "received" state.
-	row, err := p.queries.InsertTask(ctx, db.InsertTaskParams{
+	row, err := p.store.InsertTask(ctx, db.InsertTaskParams{
 		Type:           taskType,
 		Value:          taskValue,
 		State:          string(db.TaskStateReceived),

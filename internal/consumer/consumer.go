@@ -16,7 +16,7 @@ import (
 type Consumer struct {
 	pb.UnimplementedTaskServiceServer
 
-	queries      *db.Queries
+	store        db.TaskStore
 	log          *slog.Logger
 	rateLimit    int
 	ratePeriodMs int
@@ -28,9 +28,9 @@ type Consumer struct {
 }
 
 // New creates a Consumer with rate limiting configuration.
-func New(queries *db.Queries, rateLimit, ratePeriodMs int, log *slog.Logger) *Consumer {
+func New(store db.TaskStore, rateLimit, ratePeriodMs int, log *slog.Logger) *Consumer {
 	return &Consumer{
-		queries:      queries,
+		store:        store,
 		log:          log,
 		rateLimit:    rateLimit,
 		ratePeriodMs: ratePeriodMs,
@@ -67,7 +67,7 @@ func (c *Consumer) process(id int64, taskType, taskValue int32) {
 	}
 
 	// Set state to "processing".
-	if err := c.queries.UpdateTaskState(ctx, db.UpdateTaskStateParams{
+	if err := c.store.UpdateTaskState(ctx, db.UpdateTaskStateParams{
 		ID:             id,
 		State:          string(db.TaskStateProcessing),
 		LastUpdateTime: now(),
@@ -82,7 +82,7 @@ func (c *Consumer) process(id int64, taskType, taskValue int32) {
 	duration := time.Since(start).Seconds()
 
 	// Set state to "done".
-	if err := c.queries.UpdateTaskState(ctx, db.UpdateTaskStateParams{
+	if err := c.store.UpdateTaskState(ctx, db.UpdateTaskStateParams{
 		ID:             id,
 		State:          string(db.TaskStateDone),
 		LastUpdateTime: now(),
@@ -99,7 +99,7 @@ func (c *Consumer) process(id int64, taskType, taskValue int32) {
 	metrics.ProcessingDuration.Observe(duration)
 
 	// Fetch total sum for this type (spec: final log per task).
-	totalSum, err := c.queries.SumValueByType(ctx, taskType)
+	totalSum, err := c.store.SumValueByType(ctx, taskType)
 	if err != nil {
 		c.log.Error("sum value by type failed", "type", taskType, "error", err)
 		return
