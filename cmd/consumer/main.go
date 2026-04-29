@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"net"
 	"net/http"
@@ -17,32 +18,23 @@ import (
 	"github.com/erfanmomeniii/task-pipeline/internal/logger"
 	"github.com/erfanmomeniii/task-pipeline/internal/metrics"
 	pb "github.com/erfanmomeniii/task-pipeline/proto"
-	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 )
 
 var version = "dev"
 
 func main() {
-	// Spec requires: ./consumer -version
-	if len(os.Args) > 1 && os.Args[1] == "-version" {
+	showVersion := flag.Bool("version", false, "print build version and exit")
+	cfgPath := flag.String("config", "", "path to config file")
+	flag.Parse()
+
+	if *showVersion {
 		fmt.Println(version)
 		return
 	}
 
-	var cfgPath string
-
-	root := &cobra.Command{
-		Use:   "consumer",
-		Short: "Task Pipeline — Consumer service",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return run(cfgPath)
-		},
-	}
-
-	root.Flags().StringVar(&cfgPath, "config", "", "path to config file")
-
-	if err := root.Execute(); err != nil {
+	if err := run(*cfgPath); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -95,7 +87,7 @@ func run(cfgPath string) error {
 	}
 
 	srv := grpc.NewServer()
-	c := consumer.New(queries, cfg.Consumer.RateLimit, cfg.Consumer.RatePeriodMs, log)
+	c := consumer.New(queries, cfg.Consumer.RateLimit, cfg.Consumer.RatePeriodMs, cfg.Consumer.MaxWorkers, log)
 	pb.RegisterTaskServiceServer(srv, c)
 
 	// Periodically update tasks_by_state gauge from DB (every 5s).
@@ -106,6 +98,7 @@ func run(cfgPath string) error {
 		"grpc_addr", grpcAddr,
 		"rate_limit", cfg.Consumer.RateLimit,
 		"rate_period_ms", cfg.Consumer.RatePeriodMs,
+		"max_workers", cfg.Consumer.MaxWorkers,
 	)
 
 	// Graceful shutdown: stop accepting new RPCs, then wait for in-flight tasks.

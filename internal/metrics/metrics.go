@@ -64,7 +64,6 @@ func RegisterProducer() {
 	prometheus.MustRegister(
 		TasksProduced,
 		BacklogGauge,
-		TasksByState,
 	)
 }
 

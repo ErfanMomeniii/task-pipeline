@@ -36,6 +36,7 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("consumer.pprof_port", 6061)
 	v.SetDefault("consumer.rate_limit", 10)
 	v.SetDefault("consumer.rate_period_ms", 1000)
+	v.SetDefault("consumer.max_workers", 10)
 
 	// File
 	if path != "" {

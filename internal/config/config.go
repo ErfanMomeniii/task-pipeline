@@ -41,4 +41,5 @@ type ConsumerConfig struct {
 	PprofPort      int `mapstructure:"pprof_port"`
 	RateLimit      int `mapstructure:"rate_limit"`
 	RatePeriodMs   int `mapstructure:"rate_period_ms"`
+	MaxWorkers     int `mapstructure:"max_workers"`
 }

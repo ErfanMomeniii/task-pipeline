@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
@@ -14,31 +15,22 @@ import (
 	"github.com/erfanmomeniii/task-pipeline/internal/logger"
 	"github.com/erfanmomeniii/task-pipeline/internal/metrics"
 	"github.com/erfanmomeniii/task-pipeline/internal/producer"
-	"github.com/spf13/cobra"
 )
 
 var version = "dev"
 
 func main() {
-	// Spec requires: ./producer -version
-	if len(os.Args) > 1 && os.Args[1] == "-version" {
+	showVersion := flag.Bool("version", false, "print build version and exit")
+	cfgPath := flag.String("config", "", "path to config file")
+	flag.Parse()
+
+	if *showVersion {
 		fmt.Println(version)
 		return
 	}
 
-	var cfgPath string
-
-	root := &cobra.Command{
-		Use:   "producer",
-		Short: "Task Pipeline — Producer service",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return run(cfgPath)
-		},
-	}
-
-	root.Flags().StringVar(&cfgPath, "config", "", "path to config file")
-
-	if err := root.Execute(); err != nil {
+	if err := run(*cfgPath); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }

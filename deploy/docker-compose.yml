@@ -29,6 +29,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:9091/metrics || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   producer:
     build:
@@ -43,6 +49,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      consumer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:9090/metrics || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   prometheus:
     image: prom/prometheus:v3.4.0

@@ -27,12 +27,20 @@ type Consumer struct {
 	tokens   int
 	lastTick time.Time
 
+	// Bounded worker pool: limits concurrent processing goroutines.
+	// Uses a buffered channel as a semaphore (stdlib, no external deps).
+	sem chan struct{}
+
 	// Tracks in-flight process goroutines for graceful shutdown.
 	wg sync.WaitGroup
 }
 
-// New creates a Consumer with rate limiting configuration.
-func New(store db.TaskStore, rateLimit, ratePeriodMs int, log *slog.Logger) *Consumer {
+// New creates a Consumer with rate limiting and bounded concurrency.
+// maxWorkers controls the maximum number of concurrent processing goroutines.
+func New(store db.TaskStore, rateLimit, ratePeriodMs, maxWorkers int, log *slog.Logger) *Consumer {
+	if maxWorkers <= 0 {
+		maxWorkers = rateLimit // sensible default: match rate limit
+	}
 	return &Consumer{
 		store:        store,
 		log:          log,
@@ -40,6 +48,7 @@ func New(store db.TaskStore, rateLimit, ratePeriodMs int, log *slog.Logger) *Con
 		ratePeriodMs: ratePeriodMs,
 		tokens:       rateLimit,
 		lastTick:     time.Now(),
+		sem:          make(chan struct{}, maxWorkers),
 	}
 }
 
@@ -59,18 +68,19 @@ func (c *Consumer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.Tas
 	metrics.TasksReceived.Inc()
 
 	// Process asynchronously so gRPC response returns quickly.
-	// WaitGroup ensures graceful shutdown waits for in-flight tasks.
+	// Semaphore bounds concurrency; WaitGroup ensures graceful shutdown.
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
-		c.process(req.Id, req.Type, req.Value)
+		c.sem <- struct{}{}        // acquire worker slot
+		defer func() { <-c.sem }() // release worker slot
+		c.process(ctx, req.Id, req.Type, req.Value)
 	}()
 
 	return &pb.TaskResponse{Accepted: true}, nil
 }
 
-func (c *Consumer) process(id int64, taskType, taskValue int32) {
-	ctx := context.Background()
+func (c *Consumer) process(ctx context.Context, id int64, taskType, taskValue int32) {
 	now := func() float64 {
 		return float64(time.Now().UnixMilli()) / 1000.0
 	}
