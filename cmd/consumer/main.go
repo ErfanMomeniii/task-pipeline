@@ -12,13 +12,14 @@ import (
 	"syscall"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"github.com/erfanmomeniii/task-pipeline/internal/config"
 	"github.com/erfanmomeniii/task-pipeline/internal/consumer"
 	"github.com/erfanmomeniii/task-pipeline/internal/db"
 	"github.com/erfanmomeniii/task-pipeline/internal/logger"
 	"github.com/erfanmomeniii/task-pipeline/internal/metrics"
 	pb "github.com/erfanmomeniii/task-pipeline/proto"
-	"google.golang.org/grpc"
 )
 
 var version = "dev"

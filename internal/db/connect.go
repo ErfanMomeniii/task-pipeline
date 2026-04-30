@@ -6,11 +6,12 @@ import (
 	"log/slog"
 	"net/url"
 
-	"github.com/erfanmomeniii/task-pipeline/migrations"
 	"github.com/golang-migrate/migrate/v4"
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/erfanmomeniii/task-pipeline/migrations"
 )
 
 // Connect creates a pgx connection pool and returns it along with sqlc Queries.

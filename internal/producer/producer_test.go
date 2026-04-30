@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"github.com/erfanmomeniii/task-pipeline/internal/db"
 	"github.com/erfanmomeniii/task-pipeline/internal/models"
 	pb "github.com/erfanmomeniii/task-pipeline/proto"
-	"google.golang.org/grpc"
 )
 
 func TestTaskValueRanges(t *testing.T) {

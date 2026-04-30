@@ -9,12 +9,13 @@ import (
 	"bytes"
 	"log/slog"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
 	"github.com/erfanmomeniii/task-pipeline/internal/consumer"
 	"github.com/erfanmomeniii/task-pipeline/internal/db"
 	"github.com/erfanmomeniii/task-pipeline/internal/models"
 	pb "github.com/erfanmomeniii/task-pipeline/proto"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // TestGRPCRoundTrip starts an in-process gRPC server with the consumer,
