@@ -79,13 +79,13 @@ func RegisterConsumer() {
 	)
 }
 
-// Serve starts an HTTP server exposing /metrics on the given port.
-// It blocks until the server returns an error.
-func Serve(port int, log *slog.Logger) error {
+// NewServer creates an HTTP server exposing /metrics on the given port.
+// The caller is responsible for calling ListenAndServe and Shutdown.
+func NewServer(port int, log *slog.Logger) *http.Server {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 
 	addr := fmt.Sprintf(":%d", port)
 	log.Info("starting metrics server", "addr", addr)
-	return http.ListenAndServe(addr, mux)
+	return &http.Server{Addr: addr, Handler: mux}
 }

@@ -15,7 +15,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "tasks_by_state",
+          "expr": "tasks_by_state{job=\"consumer\"}",
           "legendFormat": "{{state}}"
         }
       ]
@@ -28,15 +28,15 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
-          "expr": "tasks_by_state{state=\"received\"}",
+          "expr": "tasks_by_state{job=\"consumer\", state=\"received\"}",
           "legendFormat": "received"
         },
         {
-          "expr": "tasks_by_state{state=\"processing\"}",
+          "expr": "tasks_by_state{job=\"consumer\", state=\"processing\"}",
           "legendFormat": "processing"
         },
         {
-          "expr": "tasks_by_state{state=\"done\"}",
+          "expr": "tasks_by_state{job=\"consumer\", state=\"done\"}",
           "legendFormat": "done"
         }
       ]

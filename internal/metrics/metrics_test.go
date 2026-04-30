@@ -44,7 +44,7 @@ func TestConsumerMetrics(t *testing.T) {
 	_ = reg
 }
 
-func TestServe(t *testing.T) {
+func TestNewServer(t *testing.T) {
 	lis, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatal(err)
@@ -54,9 +54,11 @@ func TestServe(t *testing.T) {
 
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 
+	srv := NewServer(port, log)
 	go func() {
-		_ = Serve(port, log)
+		_ = srv.ListenAndServe()
 	}()
+	defer srv.Close()
 
 	// Retry loop instead of fixed sleep — avoids flakiness in CI.
 	var resp *http.Response

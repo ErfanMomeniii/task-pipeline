@@ -7,12 +7,13 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
 	"github.com/erfanmomeniii/task-pipeline/internal/db"
 	"github.com/erfanmomeniii/task-pipeline/internal/metrics"
 	"github.com/erfanmomeniii/task-pipeline/internal/models"
 	pb "github.com/erfanmomeniii/task-pipeline/proto"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // Producer generates tasks and sends them to the consumer via gRPC.
@@ -113,7 +114,7 @@ func (p *Producer) produce(ctx context.Context) error {
 	metrics.BacklogGauge.Set(float64(unprocessed))
 
 	if int(unprocessed) >= p.maxBacklog {
-		p.log.Debug("backlog limit reached, skipping", "unprocessed", unprocessed, "max", p.maxBacklog)
+		p.log.Warn("backlog limit reached, production paused", "unprocessed", unprocessed, "max", p.maxBacklog)
 		return nil
 	}
 
@@ -137,8 +138,8 @@ func (p *Producer) produce(ctx context.Context) error {
 	metrics.TasksProduced.Inc()
 
 	// Send to consumer via gRPC (include DB ID so consumer updates same row).
-	// If consumer is unavailable, the task stays in "received" state in DB.
-	// The consumer will process it when it comes online.
+	// If consumer is unavailable, the task stays in "received" state in DB
+	// and will be re-submitted by the retryStale recovery loop.
 	resp, err := p.client.SubmitTask(ctx, &pb.TaskRequest{
 		Id:    row.ID,
 		Type:  taskType,

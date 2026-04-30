@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/erfanmomeniii/task-pipeline/internal/config"
 	"github.com/erfanmomeniii/task-pipeline/internal/db"
@@ -58,17 +59,19 @@ func run(cfgPath string) error {
 
 	// Prometheus metrics
 	metrics.RegisterProducer()
+	metricsSrv := metrics.NewServer(cfg.Producer.PrometheusPort, log)
 	go func() {
-		if err := metrics.Serve(cfg.Producer.PrometheusPort, log); err != nil {
+		if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error("metrics server error", "error", err)
 		}
 	}()
 
 	// pprof
+	pprofAddr := fmt.Sprintf(":%d", cfg.Producer.PprofPort)
+	log.Info("starting pprof server", "addr", pprofAddr)
+	pprofSrv := &http.Server{Addr: pprofAddr, Handler: nil}
 	go func() {
-		addr := fmt.Sprintf(":%d", cfg.Producer.PprofPort)
-		log.Info("starting pprof server", "addr", addr)
-		if err := http.ListenAndServe(addr, nil); err != nil {
+		if err := pprofSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error("pprof server error", "error", err)
 		}
 	}()
@@ -88,5 +91,13 @@ func run(cfgPath string) error {
 		"max_backlog", cfg.Producer.MaxBacklog,
 	)
 
-	return p.Run(ctx)
+	err = p.Run(ctx)
+
+	// Graceful shutdown of HTTP servers.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	metricsSrv.Shutdown(shutdownCtx)
+	pprofSrv.Shutdown(shutdownCtx)
+
+	return err
 }

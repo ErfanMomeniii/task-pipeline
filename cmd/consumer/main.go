@@ -64,17 +64,19 @@ func run(cfgPath string) error {
 
 	// Prometheus metrics
 	metrics.RegisterConsumer()
+	metricsSrv := metrics.NewServer(cfg.Consumer.PrometheusPort, log)
 	go func() {
-		if err := metrics.Serve(cfg.Consumer.PrometheusPort, log); err != nil {
+		if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error("metrics server error", "error", err)
 		}
 	}()
 
 	// pprof
+	pprofAddr := fmt.Sprintf(":%d", cfg.Consumer.PprofPort)
+	log.Info("starting pprof server", "addr", pprofAddr)
+	pprofSrv := &http.Server{Addr: pprofAddr, Handler: nil}
 	go func() {
-		addr := fmt.Sprintf(":%d", cfg.Consumer.PprofPort)
-		log.Info("starting pprof server", "addr", addr)
-		if err := http.ListenAndServe(addr, nil); err != nil {
+		if err := pprofSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error("pprof server error", "error", err)
 		}
 	}()
@@ -101,13 +103,19 @@ func run(cfgPath string) error {
 		"max_workers", cfg.Consumer.MaxWorkers,
 	)
 
-	// Graceful shutdown: stop accepting new RPCs, then wait for in-flight tasks.
+	// Graceful shutdown: stop accepting new RPCs, drain tasks, shut down HTTP servers.
 	go func() {
 		<-ctx.Done()
 		log.Info("shutting down gRPC server")
 		srv.GracefulStop()
 		log.Info("waiting for in-flight tasks to complete")
 		c.Wait()
+
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		metricsSrv.Shutdown(shutdownCtx)
+		pprofSrv.Shutdown(shutdownCtx)
+
 		log.Info("all tasks completed, shutdown done")
 	}()
 

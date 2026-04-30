@@ -58,8 +58,10 @@ MIGRATE_DSN ?= postgres://taskpipeline:taskpipeline@localhost:5432/taskpipeline?
 migrate-up:
 	migrate -database "$(MIGRATE_DSN)" -path migrations up
 
+MIGRATE_STEPS ?= 1
+
 migrate-down:
-	migrate -database "$(MIGRATE_DSN)" -path migrations down
+	migrate -database "$(MIGRATE_DSN)" -path migrations down $(MIGRATE_STEPS)
 
 ## Docker ----------------------------------------------------------------------
 
