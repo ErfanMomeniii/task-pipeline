@@ -16,6 +16,12 @@ import (
 	pb "github.com/erfanmomeniii/task-pipeline/proto"
 )
 
+// dialFunc is the function used to create gRPC connections.
+// Tests can override this to inject errors.
+var dialFunc = func(addr string) (*grpc.ClientConn, error) {
+	return grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+}
+
 // Producer generates tasks and sends them to the consumer via gRPC.
 type Producer struct {
 	store         db.TaskStore
@@ -24,11 +30,15 @@ type Producer struct {
 	log           *slog.Logger
 	ratePerSecond int
 	maxBacklog    int
+
+	// retryInterval controls how often stale tasks are re-submitted.
+	// Defaults to 10s; tests may override via struct literal.
+	retryInterval time.Duration
 }
 
 // New creates a Producer that connects to the consumer gRPC server.
-func New(ctx context.Context, store db.TaskStore, grpcAddr string, ratePerSecond, maxBacklog int, log *slog.Logger) (*Producer, error) {
-	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+func New(_ context.Context, store db.TaskStore, grpcAddr string, ratePerSecond, maxBacklog int, log *slog.Logger) (*Producer, error) {
+	conn, err := dialFunc(grpcAddr)
 	if err != nil {
 		return nil, fmt.Errorf("grpc dial %s: %w", grpcAddr, err)
 	}
@@ -40,6 +50,7 @@ func New(ctx context.Context, store db.TaskStore, grpcAddr string, ratePerSecond
 		log:           log,
 		ratePerSecond: ratePerSecond,
 		maxBacklog:    maxBacklog,
+		retryInterval: 10 * time.Second,
 	}, nil
 }
 
@@ -49,8 +60,11 @@ func (p *Producer) Run(ctx context.Context) error {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	// Recover stale "received" tasks every 10 seconds.
-	retryTicker := time.NewTicker(10 * time.Second)
+	// Recover stale "received" tasks periodically.
+	if p.retryInterval <= 0 {
+		p.retryInterval = 10 * time.Second
+	}
+	retryTicker := time.NewTicker(p.retryInterval)
 	defer retryTicker.Stop()
 
 	p.log.Info("producer loop started",

@@ -31,6 +31,31 @@ func TestNew_JSONFormat(t *testing.T) {
 	}
 }
 
+func TestNew_WarnLevel(t *testing.T) {
+	var buf bytes.Buffer
+	log := New(&buf, "text", "warn")
+	log.Info("should-not-appear")
+	log.Warn("should-appear")
+
+	out := buf.String()
+	if strings.Contains(out, "should-not-appear") {
+		t.Error("info message should be filtered at warn level")
+	}
+	if !strings.Contains(out, "should-appear") {
+		t.Error("warn message should appear at warn level")
+	}
+}
+
+func TestNew_DefaultLevel(t *testing.T) {
+	var buf bytes.Buffer
+	log := New(&buf, "text", "unknown-level")
+	log.Info("hello")
+
+	if !strings.Contains(buf.String(), "hello") {
+		t.Error("unknown level should default to info")
+	}
+}
+
 func TestNew_LevelFiltering(t *testing.T) {
 	var buf bytes.Buffer
 	log := New(&buf, "text", "error")

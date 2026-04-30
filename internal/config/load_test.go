@@ -63,6 +63,36 @@ grpc:
 	}
 }
 
+func TestLoad_InvalidEmbeddedDefaults(t *testing.T) {
+	orig := loadDefaults
+	defer func() { loadDefaults = orig }()
+
+	loadDefaults = []byte(":::invalid yaml")
+	_, err := Load("")
+	if err == nil {
+		t.Fatal("Load should fail with invalid embedded defaults")
+	}
+}
+
+func TestLoad_UnmarshalError(t *testing.T) {
+	orig := loadDefaults
+	defer func() { loadDefaults = orig }()
+
+	// YAML where port is a non-numeric string triggers Unmarshal error.
+	loadDefaults = []byte("db:\n  port: not-a-number\n")
+	_, err := Load("")
+	if err == nil {
+		t.Fatal("Load should fail when config cannot be unmarshalled into struct")
+	}
+}
+
+func TestLoad_InvalidFilePath(t *testing.T) {
+	_, err := Load("/nonexistent/path/config.yaml")
+	if err == nil {
+		t.Fatal("Load with invalid path should return error")
+	}
+}
+
 func TestLoad_EnvOverride(t *testing.T) {
 	t.Setenv("TP_DB_HOST", "envhost")
 	t.Setenv("TP_DB_PORT", "5434")

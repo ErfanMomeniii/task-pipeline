@@ -142,6 +142,50 @@ func TestProcess_SumValueByTypeFails(t *testing.T) {
 	}
 }
 
+func TestProcess_UpdateToDoneFails(t *testing.T) {
+	store := db.NewMockStore()
+	c := newTestConsumer(store, 100, 1000)
+
+	task, _ := store.InsertTask(context.Background(), db.InsertTaskParams{
+		Type: 0, Value: 1, State: string(models.TaskStateReceived),
+		CreationTime: 1000, LastUpdateTime: 1000,
+	})
+
+	// Fail on 2nd UpdateTaskState call (update to "done"), 1st (to "processing") succeeds.
+	store.UpdateErr = fmt.Errorf("disk full")
+	store.UpdateErrOnCall = 2
+
+	c.process(context.Background(), task.ID, task.Type, task.Value)
+
+	got, _ := store.GetTask(context.Background(), task.ID)
+	if got.State != string(models.TaskStateProcessing) {
+		t.Errorf("state = %q, want %q (done update failed)", got.State, models.TaskStateProcessing)
+	}
+}
+
+func TestStartStateTracker_CountError(t *testing.T) {
+	store := db.NewMockStore()
+	c := newTestConsumer(store, 100, 1000)
+
+	store.CountByStateErr = fmt.Errorf("db unavailable")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		c.StartStateTracker(ctx, 50*time.Millisecond)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Should complete even with errors (errors are logged and continued).
+	case <-time.After(2 * time.Second):
+		t.Fatal("StartStateTracker did not stop")
+	}
+}
+
 func TestAcquireToken_WithinLimit(t *testing.T) {
 	c := &Consumer{
 		rateLimit:    3,

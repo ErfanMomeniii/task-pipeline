@@ -15,10 +15,15 @@ type MockStore struct {
 	nextID atomic.Int64
 
 	// Optional error injection.
-	InsertErr      error
-	UpdateErr      error
-	SumValueErr    error
-	SumValueResult int64
+	InsertErr        error
+	UpdateErr        error
+	UpdateErrOnCall  int // fail on Nth UpdateTaskState call (1-based, 0 = use UpdateErr)
+	updateCallCount  int
+	SumValueErr      error
+	SumValueResult   int64
+	CountByStateErr  error
+	CountUnprocErr   error
+	ListStaleErr     error
 }
 
 // NewMockStore creates a MockStore ready for testing.
@@ -49,12 +54,16 @@ func (m *MockStore) InsertTask(_ context.Context, arg InsertTaskParams) (Task, e
 }
 
 func (m *MockStore) UpdateTaskState(_ context.Context, arg UpdateTaskStateParams) error {
-	if m.UpdateErr != nil {
-		return m.UpdateErr
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	m.updateCallCount++
+	if m.UpdateErrOnCall > 0 && m.updateCallCount == m.UpdateErrOnCall {
+		return m.UpdateErr
+	}
+	if m.UpdateErrOnCall == 0 && m.UpdateErr != nil {
+		return m.UpdateErr
+	}
 
 	if t, ok := m.tasks[arg.ID]; ok {
 		t.State = arg.State
@@ -74,6 +83,9 @@ func (m *MockStore) GetTask(_ context.Context, id int64) (Task, error) {
 }
 
 func (m *MockStore) CountTasksByState(_ context.Context, state string) (int64, error) {
+	if m.CountByStateErr != nil {
+		return 0, m.CountByStateErr
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -87,6 +99,9 @@ func (m *MockStore) CountTasksByState(_ context.Context, state string) (int64, e
 }
 
 func (m *MockStore) CountUnprocessed(_ context.Context) (int64, error) {
+	if m.CountUnprocErr != nil {
+		return 0, m.CountUnprocErr
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -133,6 +148,9 @@ func (m *MockStore) CountDoneByType(_ context.Context, type_ int32) (int64, erro
 }
 
 func (m *MockStore) ListStaleTasks(_ context.Context, arg ListStaleTasksParams) ([]ListStaleTasksRow, error) {
+	if m.ListStaleErr != nil {
+		return nil, m.ListStaleErr
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

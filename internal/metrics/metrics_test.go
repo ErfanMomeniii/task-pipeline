@@ -13,6 +13,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
+func TestRegisterProducer(t *testing.T) {
+	// RegisterProducer uses the default registry. Calling it once per process is safe.
+	// Verify it doesn't panic (MustRegister would panic on invalid collectors).
+	RegisterProducer()
+}
+
+func TestRegisterConsumer(t *testing.T) {
+	RegisterConsumer()
+}
+
 func TestProducerMetrics(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(TasksProduced, BacklogGauge)

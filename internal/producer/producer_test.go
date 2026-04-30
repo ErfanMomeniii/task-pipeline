@@ -3,6 +3,7 @@ package producer
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"testing"
@@ -186,6 +187,23 @@ func TestProduce_ConsumerRejects(t *testing.T) {
 	}
 }
 
+func TestNew_DialError(t *testing.T) {
+	orig := dialFunc
+	defer func() { dialFunc = orig }()
+
+	dialFunc = func(_ string) (*grpc.ClientConn, error) {
+		return nil, fmt.Errorf("connection refused")
+	}
+
+	store := db.NewMockStore()
+	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+
+	_, err := New(context.Background(), store, "localhost:0", 5, 50, log)
+	if err == nil {
+		t.Fatal("New() should return error when dial fails")
+	}
+}
+
 func TestNew_ConnectsAndClose(t *testing.T) {
 	store := db.NewMockStore()
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
@@ -198,6 +216,148 @@ func TestNew_ConnectsAndClose(t *testing.T) {
 
 	if err := p.Close(); err != nil {
 		t.Errorf("Close() error: %v", err)
+	}
+}
+
+func TestProduce_InsertTaskFails(t *testing.T) {
+	store := db.NewMockStore()
+	store.InsertErr = fmt.Errorf("db write failed")
+	mock := &mockGRPCClient{accepted: true}
+	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+
+	p := &Producer{
+		store:         store,
+		client:        mock,
+		log:           log,
+		ratePerSecond: 10,
+		maxBacklog:    100,
+	}
+
+	err := p.produce(context.Background())
+	if err == nil {
+		t.Fatal("produce should return error when InsertTask fails")
+	}
+	if mock.calls != 0 {
+		t.Errorf("gRPC calls = %d, want 0 (should not send after insert failure)", mock.calls)
+	}
+}
+
+func TestProduce_CountUnprocessedFails(t *testing.T) {
+	store := db.NewMockStore()
+	store.CountUnprocErr = fmt.Errorf("db read failed")
+	mock := &mockGRPCClient{accepted: true}
+	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+
+	p := &Producer{
+		store:         store,
+		client:        mock,
+		log:           log,
+		ratePerSecond: 10,
+		maxBacklog:    100,
+	}
+
+	err := p.produce(context.Background())
+	if err == nil {
+		t.Fatal("produce should return error when CountUnprocessed fails")
+	}
+}
+
+func TestRun_RetryTickerFires(t *testing.T) {
+	store := db.NewMockStore()
+	mock := &mockGRPCClient{accepted: true}
+	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+
+	// Insert stale task.
+	oldTime := float64(time.Now().Add(-60*time.Second).UnixMilli()) / 1000.0
+	store.InsertTask(context.Background(), db.InsertTaskParams{
+		Type: 1, Value: 10, State: string(models.TaskStateReceived),
+		CreationTime: oldTime, LastUpdateTime: oldTime,
+	})
+
+	p := &Producer{
+		store:         store,
+		client:        mock,
+		log:           log,
+		ratePerSecond: 1,
+		maxBacklog:    100,
+		retryInterval: 20 * time.Millisecond, // fast retry for test
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+
+	_ = p.Run(ctx)
+
+	// retryStale should have fired and re-submitted the stale task.
+	if mock.calls < 1 {
+		t.Errorf("gRPC calls = %d, want >= 1 (retryStale should have fired)", mock.calls)
+	}
+}
+
+func TestRun_ProduceError(t *testing.T) {
+	store := db.NewMockStore()
+	store.CountUnprocErr = fmt.Errorf("db error")
+	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+
+	p := &Producer{
+		store:         store,
+		client:        &mockGRPCClient{accepted: true},
+		log:           log,
+		ratePerSecond: 100, // fast ticker to trigger produce quickly
+		maxBacklog:    100,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := p.Run(ctx)
+	if !isContextErr(err) {
+		t.Errorf("Run() returned %v, want context error", err)
+	}
+}
+
+func TestRetryStale_ListStaleError(t *testing.T) {
+	store := db.NewMockStore()
+	store.ListStaleErr = fmt.Errorf("db query failed")
+	mock := &mockGRPCClient{accepted: true}
+	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+
+	p := &Producer{
+		store:  store,
+		client: mock,
+		log:    log,
+	}
+
+	// Should not panic, just log the error.
+	p.retryStale(context.Background())
+
+	if mock.calls != 0 {
+		t.Errorf("gRPC calls = %d, want 0", mock.calls)
+	}
+}
+
+func TestRetryStale_SubmitTaskError(t *testing.T) {
+	store := db.NewMockStore()
+	mock := &mockGRPCClient{err: fmt.Errorf("connection refused")}
+	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+
+	oldTime := float64(time.Now().Add(-60*time.Second).UnixMilli()) / 1000.0
+	store.InsertTask(context.Background(), db.InsertTaskParams{
+		Type: 1, Value: 10, State: string(models.TaskStateReceived),
+		CreationTime: oldTime, LastUpdateTime: oldTime,
+	})
+
+	p := &Producer{
+		store:  store,
+		client: mock,
+		log:    log,
+	}
+
+	// Should not panic — logs warning and stops batch.
+	p.retryStale(context.Background())
+
+	if mock.calls != 1 {
+		t.Errorf("gRPC calls = %d, want 1 (attempted then stopped)", mock.calls)
 	}
 }
 

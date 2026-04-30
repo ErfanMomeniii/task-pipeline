@@ -16,6 +16,10 @@ import (
 //go:embed config.default.yaml
 var defaultConfig []byte
 
+// loadDefaults is the config bytes used as baseline. Defaults to the embedded
+// config.default.yaml. Tests can override this to inject errors.
+var loadDefaults = defaultConfig
+
 // Load reads configuration from the given file path and environment variables.
 // When no file path is provided, embedded default values are used.
 // Environment variables are prefixed with TP_ (task-pipeline) and use underscores
@@ -25,7 +29,7 @@ func Load(path string) (*Config, error) {
 	v.SetConfigType("yaml")
 
 	// Load embedded defaults as baseline.
-	if err := v.ReadConfig(bytes.NewReader(defaultConfig)); err != nil {
+	if err := v.ReadConfig(bytes.NewReader(loadDefaults)); err != nil {
 		return nil, fmt.Errorf("read embedded defaults: %w", err)
 	}
 
