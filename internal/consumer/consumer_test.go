@@ -332,7 +332,7 @@ func FuzzAcquireToken(f *testing.F) {
 			}
 		}
 
-		if acquired > rateLimit+1 {
+		if acquired > rateLimit {
 			t.Errorf("acquired %d tokens with limit %d", acquired, rateLimit)
 		}
 	})

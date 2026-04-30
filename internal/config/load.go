@@ -1,47 +1,38 @@
 package config
 
 import (
+	"bytes"
+	_ "embed"
 	"fmt"
 	"strings"
 
 	"github.com/spf13/viper"
 )
 
+// defaultConfig is the embedded default configuration used as a fallback
+// when no config file is provided. Demonstrates use of the embed package
+// beyond migrations.
+//
+//go:embed config.default.yaml
+var defaultConfig []byte
+
 // Load reads configuration from the given file path and environment variables.
+// When no file path is provided, embedded default values are used.
 // Environment variables are prefixed with TP_ (task-pipeline) and use underscores
 // to separate nested keys (e.g., TP_DB_HOST maps to db.host).
 func Load(path string) (*Config, error) {
 	v := viper.New()
+	v.SetConfigType("yaml")
 
-	// Defaults
-	v.SetDefault("db.host", "localhost")
-	v.SetDefault("db.port", 5432)
-	v.SetDefault("db.user", "taskpipeline")
-	v.SetDefault("db.password", "taskpipeline")
-	v.SetDefault("db.name", "taskpipeline")
-	v.SetDefault("db.sslmode", "disable")
+	// Load embedded defaults as baseline.
+	if err := v.ReadConfig(bytes.NewReader(defaultConfig)); err != nil {
+		return nil, fmt.Errorf("read embedded defaults: %w", err)
+	}
 
-	v.SetDefault("log.level", "info")
-	v.SetDefault("log.format", "text")
-
-	v.SetDefault("grpc.host", "localhost")
-	v.SetDefault("grpc.port", 50051)
-
-	v.SetDefault("producer.prometheus_port", 9090)
-	v.SetDefault("producer.pprof_port", 6060)
-	v.SetDefault("producer.rate_per_second", 2)
-	v.SetDefault("producer.max_backlog", 100)
-
-	v.SetDefault("consumer.prometheus_port", 9091)
-	v.SetDefault("consumer.pprof_port", 6061)
-	v.SetDefault("consumer.rate_limit", 10)
-	v.SetDefault("consumer.rate_period_ms", 1000)
-	v.SetDefault("consumer.max_workers", 10)
-
-	// File
+	// Override with user-provided config file.
 	if path != "" {
 		v.SetConfigFile(path)
-		if err := v.ReadInConfig(); err != nil {
+		if err := v.MergeInConfig(); err != nil {
 			return nil, fmt.Errorf("read config %s: %w", path, err)
 		}
 	}

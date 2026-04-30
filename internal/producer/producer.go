@@ -42,11 +42,15 @@ func New(ctx context.Context, store db.TaskStore, grpcAddr string, ratePerSecond
 	}, nil
 }
 
-// Run starts the production loop. It blocks until ctx is cancelled.
+// Run starts the production loop and stale task recovery. It blocks until ctx is cancelled.
 func (p *Producer) Run(ctx context.Context) error {
 	interval := time.Second / time.Duration(p.ratePerSecond)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
+	// Recover stale "received" tasks every 10 seconds.
+	retryTicker := time.NewTicker(10 * time.Second)
+	defer retryTicker.Stop()
 
 	p.log.Info("producer loop started",
 		"rate_per_second", p.ratePerSecond,
@@ -62,6 +66,8 @@ func (p *Producer) Run(ctx context.Context) error {
 			if err := p.produce(ctx); err != nil {
 				p.log.Error("produce failed", "error", err)
 			}
+		case <-retryTicker.C:
+			p.retryStale(ctx)
 		}
 	}
 }
@@ -69,6 +75,33 @@ func (p *Producer) Run(ctx context.Context) error {
 // Close shuts down the gRPC connection.
 func (p *Producer) Close() error {
 	return p.conn.Close()
+}
+
+// retryStale re-submits tasks stuck in "received" state for longer than 30 seconds.
+// This handles tasks rejected by the consumer's rate limiter or lost due to transient failures.
+func (p *Producer) retryStale(ctx context.Context) {
+	cutoff := float64(time.Now().Add(-30*time.Second).UnixMilli()) / 1000.0
+	stale, err := p.store.ListStaleTasks(ctx, db.ListStaleTasksParams{
+		LastUpdateTime: cutoff,
+		Limit:          50,
+	})
+	if err != nil {
+		p.log.Error("list stale tasks failed", "error", err)
+		return
+	}
+
+	for _, t := range stale {
+		resp, err := p.client.SubmitTask(ctx, &pb.TaskRequest{
+			Id:    t.ID,
+			Type:  t.Type,
+			Value: t.Value,
+		})
+		if err != nil {
+			p.log.Warn("retry: consumer unavailable", "id", t.ID, "error", err)
+			return // consumer down, stop retrying this batch
+		}
+		p.log.Info("retry: re-submitted stale task", "id", t.ID, "accepted", resp.Accepted)
+	}
 }
 
 func (p *Producer) produce(ctx context.Context) error {

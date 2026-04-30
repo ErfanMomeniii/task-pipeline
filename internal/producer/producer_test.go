@@ -186,6 +186,71 @@ func TestProduce_ConsumerRejects(t *testing.T) {
 	}
 }
 
+func TestNew_ConnectsAndClose(t *testing.T) {
+	store := db.NewMockStore()
+	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+
+	// Use a dummy address — grpc.NewClient doesn't actually connect until RPC.
+	p, err := New(context.Background(), store, "localhost:0", 5, 50, log)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	if err := p.Close(); err != nil {
+		t.Errorf("Close() error: %v", err)
+	}
+}
+
+func TestRetryStale_ResubmitsOldTasks(t *testing.T) {
+	store := db.NewMockStore()
+	mock := &mockGRPCClient{accepted: true}
+	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+
+	// Insert a task with old timestamp (simulating 60s ago).
+	oldTime := float64(time.Now().Add(-60*time.Second).UnixMilli()) / 1000.0
+	store.InsertTask(context.Background(), db.InsertTaskParams{
+		Type: 3, Value: 42, State: string(models.TaskStateReceived),
+		CreationTime: oldTime, LastUpdateTime: oldTime,
+	})
+
+	p := &Producer{
+		store:  store,
+		client: mock,
+		log:    log,
+	}
+
+	p.retryStale(context.Background())
+
+	if mock.calls != 1 {
+		t.Errorf("gRPC calls = %d, want 1 (stale task re-submitted)", mock.calls)
+	}
+}
+
+func TestRetryStale_IgnoresRecentTasks(t *testing.T) {
+	store := db.NewMockStore()
+	mock := &mockGRPCClient{accepted: true}
+	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+
+	// Insert a task with current timestamp — should NOT be retried.
+	now := float64(time.Now().UnixMilli()) / 1000.0
+	store.InsertTask(context.Background(), db.InsertTaskParams{
+		Type: 3, Value: 42, State: string(models.TaskStateReceived),
+		CreationTime: now, LastUpdateTime: now,
+	})
+
+	p := &Producer{
+		store:  store,
+		client: mock,
+		log:    log,
+	}
+
+	p.retryStale(context.Background())
+
+	if mock.calls != 0 {
+		t.Errorf("gRPC calls = %d, want 0 (recent task should not be retried)", mock.calls)
+	}
+}
+
 func BenchmarkProduce(b *testing.B) {
 	store := db.NewMockStore()
 	mock := &mockGRPCClient{accepted: true}

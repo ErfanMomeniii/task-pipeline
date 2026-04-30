@@ -46,11 +46,9 @@ func run(cfgPath string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	// Database
+	// Database — migrations are owned by the consumer service to avoid
+	// race conditions when both services start simultaneously.
 	dsn := db.DSN(cfg.DB.Host, cfg.DB.Port, cfg.DB.User, cfg.DB.Password, cfg.DB.Name, cfg.DB.SSLMode)
-	if err := db.Migrate(dsn, log); err != nil {
-		return fmt.Errorf("migrate: %w", err)
-	}
 
 	pool, queries, err := db.Connect(ctx, dsn, log)
 	if err != nil {

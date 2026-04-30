@@ -167,17 +167,24 @@ func (c *Consumer) StartStateTracker(ctx context.Context, interval time.Duration
 }
 
 // acquireToken implements a simple token bucket rate limiter.
+// Tokens refill proportionally to elapsed time, capped at rateLimit.
 func (c *Consumer) acquireToken() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	elapsed := time.Since(c.lastTick)
+	now := time.Now()
+	elapsed := now.Sub(c.lastTick)
 	period := time.Duration(c.ratePeriodMs) * time.Millisecond
 
 	if elapsed >= period {
-		// Refill tokens for elapsed periods (don't accumulate beyond limit).
-		c.tokens = c.rateLimit
-		c.lastTick = time.Now()
+		// Calculate how many full periods elapsed and refill proportionally.
+		periods := int(elapsed / period)
+		c.tokens += periods * c.rateLimit
+		if c.tokens > c.rateLimit {
+			c.tokens = c.rateLimit // cap at max
+		}
+		// Advance lastTick by exact number of periods (avoids drift).
+		c.lastTick = c.lastTick.Add(time.Duration(periods) * period)
 	}
 
 	if c.tokens > 0 {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 
 	"github.com/erfanmomeniii/task-pipeline/migrations"
 	"github.com/golang-migrate/migrate/v4"
@@ -50,9 +51,14 @@ func Migrate(dsn string, log *slog.Logger) error {
 }
 
 // DSN builds a PostgreSQL connection string from components.
+// Uses net/url to safely escape special characters in credentials.
 func DSN(host string, port int, user, password, dbname, sslmode string) string {
-	return fmt.Sprintf(
-		"postgres://%s:%s@%s:%d/%s?sslmode=%s",
-		user, password, host, port, dbname, sslmode,
-	)
+	u := url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(user, password),
+		Host:     fmt.Sprintf("%s:%d", host, port),
+		Path:     dbname,
+		RawQuery: fmt.Sprintf("sslmode=%s", url.QueryEscape(sslmode)),
+	}
+	return u.String()
 }

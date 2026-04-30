@@ -12,6 +12,7 @@ type TaskStore interface {
 	CountUnprocessed(ctx context.Context) (int64, error)
 	SumValueByType(ctx context.Context, type_ int32) (int64, error)
 	CountDoneByType(ctx context.Context, type_ int32) (int64, error)
+	ListStaleTasks(ctx context.Context, arg ListStaleTasksParams) ([]ListStaleTasksRow, error)
 }
 
 // Compile-time check that Queries implements TaskStore.

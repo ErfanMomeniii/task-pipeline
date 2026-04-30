@@ -132,6 +132,25 @@ func (m *MockStore) CountDoneByType(_ context.Context, type_ int32) (int64, erro
 	return count, nil
 }
 
+func (m *MockStore) ListStaleTasks(_ context.Context, arg ListStaleTasksParams) ([]ListStaleTasksRow, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var results []ListStaleTasksRow
+	for _, t := range m.tasks {
+		if t.State == string(models.TaskStateReceived) && t.LastUpdateTime < arg.LastUpdateTime {
+			results = append(results, ListStaleTasksRow{
+				ID: t.ID, Type: t.Type, Value: t.Value,
+				State: t.State, CreationTime: t.CreationTime, LastUpdateTime: t.LastUpdateTime,
+			})
+			if int32(len(results)) >= arg.Limit {
+				break
+			}
+		}
+	}
+	return results, nil
+}
+
 // GetAll returns all tasks (test helper).
 func (m *MockStore) GetAll() []Task {
 	m.mu.Lock()
