@@ -17,11 +17,11 @@ services:
 
   consumer:
     build:
-      context: ..
+      context: .
       dockerfile: Dockerfile.consumer
     command: ["--config", "/etc/task-pipeline/config.yaml"]
     volumes:
-      - ../config.docker.yaml:/etc/task-pipeline/config.yaml:ro
+      - ./config.docker.yaml:/etc/task-pipeline/config.yaml:ro
     ports:
       - "9091:9091"
       - "6061:6061"
@@ -38,11 +38,11 @@ services:
 
   producer:
     build:
-      context: ..
+      context: .
       dockerfile: Dockerfile.producer
     command: ["--config", "/etc/task-pipeline/config.yaml"]
     volumes:
-      - ../config.docker.yaml:/etc/task-pipeline/config.yaml:ro
+      - ./config.docker.yaml:/etc/task-pipeline/config.yaml:ro
     ports:
       - "9090:9090"
       - "6060:6060"
@@ -61,7 +61,7 @@ services:
   prometheus:
     image: prom/prometheus:v3.4.0
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports:
       - "9092:9090"
     depends_on:
@@ -76,8 +76,8 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
     volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
       - "3000:3000"
     depends_on:

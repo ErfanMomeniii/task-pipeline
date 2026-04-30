@@ -1,0 +1,38 @@
+namespace: task-pipeline
+
+image:
+  producer:
+    repository: task-pipeline-producer
+    tag: latest
+  consumer:
+    repository: task-pipeline-consumer
+    tag: latest
+  pullPolicy: IfNotPresent
+
+postgres:
+  enabled: true
+  image: postgres:17-alpine
+  user: taskpipeline
+  password: taskpipeline
+  database: taskpipeline
+  storage: 1Gi
+
+consumer:
+  replicas: 1
+  grpcPort: 50051
+  metricsPort: 9091
+  pprofPort: 6061
+  rateLimit: 10
+  ratePeriodMs: 1000
+  maxWorkers: 10
+
+producer:
+  replicas: 1
+  metricsPort: 9090
+  pprofPort: 6060
+  ratePerSecond: 2
+  maxBacklog: 100
+
+log:
+  level: info
+  format: text

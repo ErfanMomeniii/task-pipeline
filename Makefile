@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags="-s -w -X main.version=$(VERSION)"
 
-.PHONY: all build build-producer build-consumer build-pgo test lint coverage clean proto migrate-up migrate-down up down logs pgo-collect flamegraph-producer flamegraph-consumer bench
+.PHONY: all build build-producer build-consumer build-pgo test lint coverage clean proto migrate-up migrate-down up down logs pgo-collect flamegraph-producer flamegraph-consumer bench build-docker kind-load helm-install helm-uninstall
 
 all: build
 
@@ -66,13 +66,13 @@ migrate-down:
 ## Docker ----------------------------------------------------------------------
 
 up:
-	docker compose -f deploy/docker-compose.yml up --build -d
+	docker compose up --build -d
 
 down:
-	docker compose -f deploy/docker-compose.yml down -v
+	docker compose down -v
 
 logs:
-	docker compose -f deploy/docker-compose.yml logs -f
+	docker compose logs -f
 
 ## Profiling -------------------------------------------------------------------
 
@@ -98,6 +98,22 @@ heap-consumer:
 
 bench:
 	go test -bench=. -benchmem ./...
+
+## Kind + Helm -----------------------------------------------------------------
+
+build-docker:
+	docker build -f Dockerfile.producer -t task-pipeline-producer:latest .
+	docker build -f Dockerfile.consumer -t task-pipeline-consumer:latest .
+
+kind-load: build-docker
+	kind load docker-image task-pipeline-producer:latest
+	kind load docker-image task-pipeline-consumer:latest
+
+helm-install:
+	helm upgrade --install task-pipeline ./deploy/helm
+
+helm-uninstall:
+	helm uninstall task-pipeline
 
 ## Cleanup ---------------------------------------------------------------------
 

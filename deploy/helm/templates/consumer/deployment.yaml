@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: consumer
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "task-pipeline.labels" . | nindent 4 }}
+    app.kubernetes.io/name: consumer
+spec:
+  replicas: {{ .Values.consumer.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: consumer
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: consumer
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.consumer.metricsPort }}"
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.37
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z postgres 5432; do
+                echo "waiting for postgres..."
+                sleep 2
+              done
+      containers:
+        - name: consumer
+          image: "{{ .Values.image.consumer.repository }}:{{ .Values.image.consumer.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["--config", "/etc/task-pipeline/config.yaml"]
+          ports:
+            - containerPort: {{ .Values.consumer.grpcPort }}
+              name: grpc
+            - containerPort: {{ .Values.consumer.metricsPort }}
+              name: metrics
+            - containerPort: {{ .Values.consumer.pprofPort }}
+              name: pprof
+          volumeMounts:
+            - name: config
+              mountPath: /etc/task-pipeline
+              readOnly: true
+          readinessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: grpc
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: task-pipeline-config

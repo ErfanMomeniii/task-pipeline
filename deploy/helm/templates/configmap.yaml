@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: task-pipeline-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "task-pipeline.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    db:
+      host: postgres
+      port: 5432
+      user: {{ .Values.postgres.user }}
+      password: "{{ .Values.postgres.password }}"
+      name: {{ .Values.postgres.database }}
+      sslmode: disable
+
+    log:
+      level: {{ .Values.log.level }}
+      format: {{ .Values.log.format }}
+
+    grpc:
+      host: consumer
+      port: {{ .Values.consumer.grpcPort }}
+
+    producer:
+      prometheus_port: {{ .Values.producer.metricsPort }}
+      pprof_port: {{ .Values.producer.pprofPort }}
+      rate_per_second: {{ .Values.producer.ratePerSecond }}
+      max_backlog: {{ .Values.producer.maxBacklog }}
+
+    consumer:
+      prometheus_port: {{ .Values.consumer.metricsPort }}
+      pprof_port: {{ .Values.consumer.pprofPort }}
+      rate_limit: {{ .Values.consumer.rateLimit }}
+      rate_period_ms: {{ .Values.consumer.ratePeriodMs }}
+      max_workers: {{ .Values.consumer.maxWorkers }}

@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: producer
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "task-pipeline.labels" . | nindent 4 }}
+    app.kubernetes.io/name: producer
+spec:
+  replicas: {{ .Values.producer.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: producer
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: producer
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.producer.metricsPort }}"
+    spec:
+      initContainers:
+        - name: wait-for-consumer
+          image: busybox:1.37
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z consumer {{ .Values.consumer.grpcPort }}; do
+                echo "waiting for consumer gRPC..."
+                sleep 2
+              done
+      containers:
+        - name: producer
+          image: "{{ .Values.image.producer.repository }}:{{ .Values.image.producer.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["--config", "/etc/task-pipeline/config.yaml"]
+          ports:
+            - containerPort: {{ .Values.producer.metricsPort }}
+              name: metrics
+            - containerPort: {{ .Values.producer.pprofPort }}
+              name: pprof
+          volumeMounts:
+            - name: config
+              mountPath: /etc/task-pipeline
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: task-pipeline-config
