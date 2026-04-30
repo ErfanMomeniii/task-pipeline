@@ -7,26 +7,16 @@ import (
 	"math/rand/v2"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-
 	"github.com/erfanmomeniii/task-pipeline/internal/db"
 	"github.com/erfanmomeniii/task-pipeline/internal/metrics"
 	"github.com/erfanmomeniii/task-pipeline/internal/models"
 	pb "github.com/erfanmomeniii/task-pipeline/proto"
 )
 
-// dialFunc is the function used to create gRPC connections.
-// Tests can override this to inject errors.
-var dialFunc = func(addr string) (*grpc.ClientConn, error) {
-	return grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-}
-
 // Producer generates tasks and sends them to the consumer via gRPC.
 type Producer struct {
 	store         db.TaskStore
 	client        pb.TaskServiceClient
-	conn          *grpc.ClientConn
 	log           *slog.Logger
 	ratePerSecond int
 	maxBacklog    int
@@ -36,22 +26,17 @@ type Producer struct {
 	retryInterval time.Duration
 }
 
-// New creates a Producer that connects to the consumer gRPC server.
-func New(_ context.Context, store db.TaskStore, grpcAddr string, ratePerSecond, maxBacklog int, log *slog.Logger) (*Producer, error) {
-	conn, err := dialFunc(grpcAddr)
-	if err != nil {
-		return nil, fmt.Errorf("grpc dial %s: %w", grpcAddr, err)
-	}
-
+// New creates a Producer that sends tasks to the consumer via the given gRPC client.
+// The caller owns the gRPC connection lifecycle.
+func New(client pb.TaskServiceClient, store db.TaskStore, ratePerSecond, maxBacklog int, log *slog.Logger) *Producer {
 	return &Producer{
 		store:         store,
-		client:        pb.NewTaskServiceClient(conn),
-		conn:          conn,
+		client:        client,
 		log:           log,
 		ratePerSecond: ratePerSecond,
 		maxBacklog:    maxBacklog,
 		retryInterval: 10 * time.Second,
-	}, nil
+	}
 }
 
 // Run starts the production loop and stale task recovery. It blocks until ctx is cancelled.
@@ -85,11 +70,6 @@ func (p *Producer) Run(ctx context.Context) error {
 			p.retryStale(ctx)
 		}
 	}
-}
-
-// Close shuts down the gRPC connection.
-func (p *Producer) Close() error {
-	return p.conn.Close()
 }
 
 // retryStale re-submits tasks stuck in "received" state for longer than 30 seconds.

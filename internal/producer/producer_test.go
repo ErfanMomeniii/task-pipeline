@@ -188,35 +188,20 @@ func TestProduce_ConsumerRejects(t *testing.T) {
 	}
 }
 
-func TestNew_DialError(t *testing.T) {
-	orig := dialFunc
-	defer func() { dialFunc = orig }()
-
-	dialFunc = func(_ string) (*grpc.ClientConn, error) {
-		return nil, fmt.Errorf("connection refused")
-	}
-
+func TestNew_CreatesProducer(t *testing.T) {
 	store := db.NewMockStore()
+	mock := &mockGRPCClient{accepted: true}
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 
-	_, err := New(context.Background(), store, "localhost:0", 5, 50, log)
-	if err == nil {
-		t.Fatal("New() should return error when dial fails")
+	p := New(mock, store, 5, 50, log)
+	if p == nil {
+		t.Fatal("New() returned nil")
 	}
-}
-
-func TestNew_ConnectsAndClose(t *testing.T) {
-	store := db.NewMockStore()
-	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
-
-	// Use a dummy address — grpc.NewClient doesn't actually connect until RPC.
-	p, err := New(context.Background(), store, "localhost:0", 5, 50, log)
-	if err != nil {
-		t.Fatalf("New() error: %v", err)
+	if p.ratePerSecond != 5 {
+		t.Errorf("ratePerSecond = %d, want 5", p.ratePerSecond)
 	}
-
-	if err := p.Close(); err != nil {
-		t.Errorf("Close() error: %v", err)
+	if p.maxBacklog != 50 {
+		t.Errorf("maxBacklog = %d, want 50", p.maxBacklog)
 	}
 }
 
