@@ -25,9 +25,9 @@ Two Go microservices (producer/consumer) communicating via gRPC, with PostgreSQL
      └─────────────────┘
 ```
 
-**Producer** generates tasks with random `type` (0–9) and `value` (0–99), persists them in PostgreSQL with state `received`, and sends them to the consumer via gRPC. Respects a configurable `max_backlog` limit — stops producing when the number of unprocessed tasks reaches the threshold.
+**Producer** generates tasks with random `type` (0–9) and `value` (0–99), persists them in PostgreSQL with state `received`, and sends them to the consumer via gRPC. Respects a configurable `max_backlog` limit — stops producing when unprocessed tasks reach the threshold. Includes a stale task recovery loop that re-submits tasks stuck in `received` state for longer than 30 seconds.
 
-**Consumer** receives tasks via gRPC, transitions state to `processing`, sleeps for `value` milliseconds (simulating work), then marks `done`. Implements a token-bucket rate limiter (configurable tasks per time period). For each completed task, logs the task content and the cumulative value sum for that task's type.
+**Consumer** receives tasks via gRPC, transitions state to `processing`, sleeps for `value` milliseconds (simulating work), then marks `done`. Implements a token-bucket rate limiter with proportional refill (configurable tasks per time period). Bounds concurrency via a buffered-channel semaphore (`max_workers`). For each completed task, logs the task content and the cumulative value sum for that task's type.
 
 ## Quick Start
 
@@ -68,7 +68,7 @@ docker run -d --name pg -e POSTGRES_USER=taskpipeline \
 # 2. Build both binaries
 make build
 
-# 3. Start consumer first (gRPC server must be up before producer connects)
+# 3. Start consumer first (owns DB migrations, gRPC server must be up before producer)
 ./bin/consumer --config config.yaml
 
 # 4. Start producer in another terminal
@@ -79,8 +79,8 @@ make build
 
 Configuration is loaded via three layers (highest priority wins):
 
-1. **Defaults** — sensible values hardcoded in the application
-2. **YAML file** — `--config config.yaml`
+1. **Embedded defaults** — sensible values baked into the binary via `//go:embed`
+2. **YAML file** — `--config config.yaml` (merged on top of defaults)
 3. **Environment variables** — prefixed with `TP_`, nested with underscores
 
 ```bash
@@ -88,16 +88,17 @@ Configuration is loaded via three layers (highest priority wins):
 TP_DB_HOST=mydb TP_GRPC_PORT=9999 ./bin/producer --config config.yaml
 ```
 
-See [`config.yaml`](config.yaml) for all available options with their defaults.
+See [`config.yaml`](config.yaml) for all available options.
 
 ### Key configuration options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `producer.rate_per_second` | 2 | How many tasks per second to produce |
+| `producer.rate_per_second` | 2 | Tasks produced per second |
 | `producer.max_backlog` | 100 | Stop producing when unprocessed tasks reach this count |
 | `consumer.rate_limit` | 10 | Max tasks accepted per time period |
 | `consumer.rate_period_ms` | 1000 | Time period for rate limiter (ms) |
+| `consumer.max_workers` | 10 | Max concurrent processing goroutines |
 | `log.level` | info | Log level: debug, info, warn, error |
 | `log.format` | text | Log format: text (console) or json (structured) |
 
@@ -108,12 +109,14 @@ make build        # Build both binaries with -ldflags="-s -w" and version inject
 make test         # Run tests with -race
 make coverage     # Generate HTML coverage report
 make lint         # Run golangci-lint
+make bench        # Run benchmarks
 make proto        # Regenerate gRPC code from .proto
 make migrate-up   # Run DB migrations (requires running PostgreSQL)
-make migrate-down # Rollback migrations
+make migrate-down # Rollback last migration (configurable: MIGRATE_STEPS=N)
 make up           # Docker Compose up (build + start)
 make down         # Docker Compose down (stop + remove volumes)
 make logs         # Tail Docker Compose logs
+make clean        # Remove bin/, profiles/, coverage files
 ```
 
 ## Project Structure
@@ -121,16 +124,16 @@ make logs         # Tail Docker Compose logs
 ```
 task-pipeline/
 ├── cmd/
-│   ├── producer/main.go         # Producer CLI entry point (Cobra)
-│   └── consumer/main.go         # Consumer CLI entry point (Cobra)
+│   ├── producer/main.go         # Producer entry point (flag-based CLI)
+│   └── consumer/main.go         # Consumer entry point (flag-based CLI)
 ├── internal/
-│   ├── config/                  # Shared Viper config loading (YAML + env + defaults)
-│   ├── db/                      # Shared persistence (sqlc generated code + connection + migrations)
-│   ├── models/                  # Domain types (TaskState constants) shared across services
+│   ├── config/                  # Shared Viper config loading (embedded defaults + YAML + env)
+│   ├── db/                      # Shared persistence (sqlc generated + connection + migrations)
+│   ├── models/                  # Domain types (TaskState constants)
 │   ├── metrics/                 # Prometheus metrics definitions + HTTP server
 │   ├── logger/                  # slog wrapper (configurable level + format)
-│   ├── producer/                # Producer business logic (generation loop, backlog control)
-│   └── consumer/                # Consumer business logic (gRPC handler, rate limiter, processing)
+│   ├── producer/                # Producer logic (generation loop, backlog control, stale retry)
+│   └── consumer/                # Consumer logic (gRPC handler, rate limiter, worker pool)
 ├── proto/                       # gRPC protobuf definitions + generated Go code
 ├── migrations/                  # gomigrate SQL files (embedded via embed package)
 ├── deploy/
@@ -141,39 +144,41 @@ task-pipeline/
 ├── Dockerfile.producer          # Multi-stage build for producer
 ├── Dockerfile.consumer          # Multi-stage build for consumer
 ├── sqlc.yaml                    # sqlc configuration (PostgreSQL + pgx/v5)
+├── .golangci.yml                # Linter configuration
 ├── config.yaml                  # Default config (local development)
 └── config.docker.yaml           # Docker-specific config (container hostnames)
 ```
 
-### Design decisions on shared code
+### Design decisions
 
-- **`internal/models/`** defines domain types (`TaskState` constants) used across both services — single source of truth for state values.
-- **`internal/db/`** is the shared persistence package — both services import the same sqlc-generated queries and connection logic. This ensures a single source of truth for the database schema and avoids drift between producer and consumer.
-- **`internal/config/`** provides a shared config struct — each service loads the full config but uses only its relevant section.
-- **`migrations/`** lives at the project root with an `embed.go` file that exposes `migrations.FS`. The `internal/db` package imports this to run embedded migrations at startup — no external migration files needed at runtime.
+- **`internal/db/`** is the shared persistence package — both services import the same sqlc-generated queries and connection logic, ensuring a single source of truth for the database schema.
+- **`internal/config/`** provides a shared config struct with embedded defaults via `//go:embed`. Each service loads the full config but uses only its relevant section.
+- **`migrations/`** lives at the project root with an `embed.go` that exposes `migrations.FS`. The consumer runs embedded migrations at startup — no external migration files needed at runtime. The consumer owns migrations to avoid race conditions when both services start simultaneously.
 - **No `pkg/` directory** — there are no external consumers, so everything stays in `internal/`.
 
 ## Technical Choices
 
 | Choice | Why |
 |--------|-----|
-| **gRPC (HTTP/2)** | Type-safe protobuf contracts with compile-time guarantees. HTTP/2 multiplexing is more scalable than REST for high-throughput service-to-service communication. No Swagger documentation needed — the `.proto` file is the contract. |
-| **PostgreSQL** | Both services write to the same database concurrently — PostgreSQL handles concurrent connections natively (unlike SQLite). gomigrate and sqlc have first-class PostgreSQL support. Running in Docker adds zero extra complexity. |
-| **slog (stdlib)** | Go 1.21+ standard library structured logging. Supports configurable levels (debug/info/warn/error) and formats (text/json) via `TextHandler`/`JSONHandler`. No external dependencies needed. |
-| **Viper** | Industry-standard Go configuration library. Supports YAML files + environment variables + defaults. Listed in the spec's helpful materials. |
-| **sqlc** | Generates type-safe Go code from SQL queries — no ORM overhead, compile-time query validation, and the generated code uses `pgx/v5` natively. |
+| **gRPC** | Type-safe protobuf contracts with compile-time guarantees. HTTP/2 multiplexing outperforms REST for service-to-service communication. No Swagger docs needed — the `.proto` file is the contract. For a 1:1 producer-consumer, a direct RPC is simpler than a message broker (RabbitMQ/Kafka), which would add infrastructure complexity without benefit. Reliability is handled via DB-backed state and stale task retry. |
+| **PostgreSQL** | Both services write concurrently — PostgreSQL handles this natively (unlike SQLite). gomigrate and sqlc have first-class support. Running in Docker adds zero extra complexity. |
+| **slog (stdlib)** | Go 1.21+ structured logging from the standard library. Configurable levels and formats (text/json) via `TextHandler`/`JSONHandler`. No external dependencies. |
+| **Viper** | Industry-standard configuration library. Supports YAML + environment variables + defaults. |
+| **sqlc** | Generates type-safe Go code from SQL — no ORM overhead, compile-time query validation, native pgx/v5 support. |
 | **pgx/v5** | The most performant Go PostgreSQL driver with built-in connection pooling (`pgxpool`). |
-| **Token bucket rate limiter** | Simple, effective rate limiting with mutex protection. Justified use of `sync.Mutex`: the rate limiter state is shared across concurrent gRPC handler goroutines. No channels needed — the limiter is a synchronous check, not a data pipeline. |
+| **Token bucket rate limiter** | Proportional token refill based on elapsed periods, capped at max. Uses `sync.Mutex` because the state is shared across concurrent gRPC handler goroutines — a synchronous check, not a data pipeline. |
+| **Buffered channel semaphore** | Bounds concurrent processing goroutines (`max_workers`). Standard library pattern — no external deps. |
 
 ### Concurrency design
 
-- **Producer**: single goroutine with a `time.Ticker` loop. No concurrency needed — tasks are generated sequentially at a configured rate. Additional goroutines run the Prometheus and pprof HTTP servers.
-- **Consumer**: each incoming gRPC call spawns a goroutine for async processing (`go c.process(...)`) so the gRPC response returns immediately. The rate limiter uses a `sync.Mutex` to safely coordinate token acquisition across concurrent handlers.
-- **No channels**: the architecture is request/response (gRPC) with fire-and-forget processing. Channels would add unnecessary complexity — there's no data pipeline or fan-out/fan-in pattern.
+- **Producer**: single goroutine with two `time.Ticker` loops — one for task generation at a configured rate, another for stale task recovery every 10s. Additional goroutines run Prometheus and pprof HTTP servers.
+- **Consumer**: each gRPC call spawns a goroutine for async processing. Concurrency is bounded by a buffered-channel semaphore (`max_workers`). A `sync.WaitGroup` tracks in-flight goroutines for graceful shutdown. The rate limiter uses a `sync.Mutex` to coordinate token acquisition.
+- **No channels for data flow**: the architecture is request/response (gRPC) with fire-and-forget processing. Channels would add unnecessary complexity — there is no fan-out/fan-in pattern.
+- **Graceful shutdown**: the consumer stops accepting new RPCs via `GracefulStop()`, waits for in-flight tasks to complete via `wg.Wait()`, then shuts down HTTP servers with a 5-second timeout. The producer stops its loop on context cancellation and shuts down HTTP servers.
 
 ## Database Migrations
 
-Migrations are embedded in the binary via Go's `embed` package and run automatically at startup. For manual migration during the demo:
+Migrations are embedded in the binary via Go's `embed` package and run automatically at consumer startup. For manual migration during the demo:
 
 ```bash
 # Apply all pending migrations (while services are running)
@@ -181,25 +186,36 @@ make migrate-up
 
 # Rollback the last migration (removes "comment" column)
 make migrate-down
+
+# Rollback multiple steps
+make migrate-down MIGRATE_STEPS=2
 ```
 
-Migration 000001 creates the `tasks` table. Migration 000002 adds/removes a `comment` column — designed for demonstrating live migration up/down while services are running.
+Migration `000001` creates the `tasks` table with a `task_state` enum. Migration `000002` adds/removes a `comment` column — designed for demonstrating live migration up/down while services are running.
 
 ## Profiling
 
 Both services expose pprof endpoints on configurable ports.
 
-### Flame graph (CPU profile)
+### CPU flame graph
 
 ```bash
-# Collect a 30-second CPU profile and open interactive viewer
+# Collect 30s CPU profile and open interactive viewer
 go tool pprof -http=:8080 http://localhost:6060/debug/pprof/profile?seconds=30
+
+# Or use Makefile targets
+make flamegraph-producer    # Opens browser with flame graph
+make flamegraph-consumer
 ```
 
 ### Memory profile
 
 ```bash
 go tool pprof -http=:8080 http://localhost:6060/debug/pprof/heap
+
+# Or use Makefile targets
+make heap-producer
+make heap-consumer
 ```
 
 ### Goroutine dump
@@ -210,26 +226,26 @@ curl http://localhost:6060/debug/pprof/goroutine?debug=2
 
 ### GOGC & GOMEMLIMIT
 
-These Go runtime parameters control the garbage collector behavior:
+These Go runtime parameters control garbage collector behavior:
 
 ```bash
 # GOGC=200: GC triggers at 2x live heap (default 100 = 1x)
-# Effect: fewer GC cycles → less CPU, but higher memory usage
+# Fewer GC cycles → less CPU, but higher memory usage
 GOGC=200 ./bin/consumer --config config.yaml
 
 # GOMEMLIMIT=128MiB: hard memory cap
-# Effect: GC runs more aggressively near the limit → prevents OOM
+# GC runs more aggressively near the limit → prevents OOM
 GOMEMLIMIT=128MiB ./bin/consumer --config config.yaml
 
-# Combined: soft GC target via GOGC + hard cap via GOMEMLIMIT
-# Best practice for production: set GOMEMLIMIT to ~90% of container memory limit
+# Combined: soft GC target + hard cap
+# Best practice: set GOMEMLIMIT to ~90% of container memory limit
 GOGC=200 GOMEMLIMIT=256MiB ./bin/consumer --config config.yaml
 ```
 
 ### Profile-Guided Optimization (PGO)
 
 ```bash
-# 1. Run services, then collect CPU profiles
+# 1. Run services under load, then collect CPU profiles
 make pgo-collect    # Fetches 30s profiles from both services
 
 # 2. Rebuild with PGO
@@ -253,6 +269,25 @@ Build uses `-ldflags="-s -w -X main.version=$(VERSION)"`:
 - `-s` strips the symbol table
 - `-w` strips DWARF debug information
 - `-X main.version=...` injects the build version at compile time
+
+## Test Coverage
+
+All business logic packages are at 100% coverage:
+
+```bash
+make test       # Run all tests with race detector
+make coverage   # Generate HTML coverage report
+make bench      # Run benchmarks
+```
+
+| Package | Coverage |
+|---------|----------|
+| `internal/config` | 100% |
+| `internal/consumer` | 100% |
+| `internal/producer` | 100% |
+| `internal/logger` | 100% |
+| `internal/metrics` | 100% |
+| `internal/db` | 62% (remaining: sqlc-generated queries + real DB functions) |
 
 ## Grafana Dashboards
 
