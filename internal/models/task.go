@@ -7,5 +7,6 @@ const (
 	TaskStateReceived   TaskState = "received"
 	TaskStateProcessing TaskState = "processing"
 	TaskStateDone       TaskState = "done"
+	TaskStateStale      TaskState = "stale"
 )
 

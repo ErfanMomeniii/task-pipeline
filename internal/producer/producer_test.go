@@ -126,7 +126,7 @@ func TestProduce_BacklogLimitReached(t *testing.T) {
 	}
 }
 
-func TestProduce_GRPCFailure_TaskStillPersisted(t *testing.T) {
+func TestProduce_GRPCFailure_TaskMarkedStale(t *testing.T) {
 	store := db.NewMockStore()
 	mock := &mockGRPCClient{err: context.DeadlineExceeded}
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
@@ -145,17 +145,17 @@ func TestProduce_GRPCFailure_TaskStillPersisted(t *testing.T) {
 		t.Fatalf("produce should not error on gRPC failure, got: %v", err)
 	}
 
-	// Task should still be inserted in DB with "received" state.
+	// Task should be marked as "stale" after gRPC failure.
 	tasks := store.GetAll()
 	if len(tasks) != 1 {
 		t.Fatalf("got %d tasks, want 1", len(tasks))
 	}
-	if tasks[0].State != string(models.TaskStateReceived) {
-		t.Errorf("state = %q, want received", tasks[0].State)
+	if tasks[0].State != string(models.TaskStateStale) {
+		t.Errorf("state = %q, want stale", tasks[0].State)
 	}
 }
 
-func TestProduce_ConsumerRejects(t *testing.T) {
+func TestProduce_ConsumerRejects_TaskMarkedStale(t *testing.T) {
 	store := db.NewMockStore()
 	mock := &mockGRPCClient{accepted: false} // consumer rate-limits
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
@@ -173,13 +173,13 @@ func TestProduce_ConsumerRejects(t *testing.T) {
 		t.Fatalf("produce should not error when consumer rejects, got: %v", err)
 	}
 
-	// Task should still be persisted in DB.
+	// Task should be marked as "stale" after rejection.
 	tasks := store.GetAll()
 	if len(tasks) != 1 {
 		t.Fatalf("got %d tasks, want 1", len(tasks))
 	}
-	if tasks[0].State != string(models.TaskStateReceived) {
-		t.Errorf("state = %q, want received", tasks[0].State)
+	if tasks[0].State != string(models.TaskStateStale) {
+		t.Errorf("state = %q, want stale", tasks[0].State)
 	}
 
 	// gRPC was called.
@@ -254,10 +254,10 @@ func TestRun_RetryTickerFires(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 
 	// Insert stale task.
-	oldTime := float64(time.Now().Add(-60*time.Second).UnixMilli()) / 1000.0
+	now := float64(time.Now().UnixMilli()) / 1000.0
 	store.InsertTask(context.Background(), db.InsertTaskParams{
-		Type: 1, Value: 10, State: string(models.TaskStateReceived),
-		CreationTime: oldTime, LastUpdateTime: oldTime,
+		Type: 1, Value: 10, State: string(models.TaskStateStale),
+		CreationTime: now, LastUpdateTime: now,
 	})
 
 	p := &Producer{
@@ -327,10 +327,10 @@ func TestRetryStale_SubmitTaskError(t *testing.T) {
 	mock := &mockGRPCClient{err: fmt.Errorf("connection refused")}
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 
-	oldTime := float64(time.Now().Add(-60*time.Second).UnixMilli()) / 1000.0
+	now := float64(time.Now().UnixMilli()) / 1000.0
 	store.InsertTask(context.Background(), db.InsertTaskParams{
-		Type: 1, Value: 10, State: string(models.TaskStateReceived),
-		CreationTime: oldTime, LastUpdateTime: oldTime,
+		Type: 1, Value: 10, State: string(models.TaskStateStale),
+		CreationTime: now, LastUpdateTime: now,
 	})
 
 	p := &Producer{
@@ -347,16 +347,16 @@ func TestRetryStale_SubmitTaskError(t *testing.T) {
 	}
 }
 
-func TestRetryStale_ResubmitsOldTasks(t *testing.T) {
+func TestRetryStale_ResubmitsStaleTasks(t *testing.T) {
 	store := db.NewMockStore()
 	mock := &mockGRPCClient{accepted: true}
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 
-	// Insert a task with old timestamp (simulating 60s ago).
-	oldTime := float64(time.Now().Add(-60*time.Second).UnixMilli()) / 1000.0
+	// Insert a task with "stale" state.
+	now := float64(time.Now().UnixMilli()) / 1000.0
 	store.InsertTask(context.Background(), db.InsertTaskParams{
-		Type: 3, Value: 42, State: string(models.TaskStateReceived),
-		CreationTime: oldTime, LastUpdateTime: oldTime,
+		Type: 3, Value: 42, State: string(models.TaskStateStale),
+		CreationTime: now, LastUpdateTime: now,
 	})
 
 	p := &Producer{
@@ -372,12 +372,12 @@ func TestRetryStale_ResubmitsOldTasks(t *testing.T) {
 	}
 }
 
-func TestRetryStale_IgnoresRecentTasks(t *testing.T) {
+func TestRetryStale_IgnoresReceivedTasks(t *testing.T) {
 	store := db.NewMockStore()
 	mock := &mockGRPCClient{accepted: true}
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 
-	// Insert a task with current timestamp — should NOT be retried.
+	// Insert a task in "received" state — should NOT be retried (only "stale" tasks are retried).
 	now := float64(time.Now().UnixMilli()) / 1000.0
 	store.InsertTask(context.Background(), db.InsertTaskParams{
 		Type: 3, Value: 42, State: string(models.TaskStateReceived),
@@ -393,7 +393,33 @@ func TestRetryStale_IgnoresRecentTasks(t *testing.T) {
 	p.retryStale(context.Background())
 
 	if mock.calls != 0 {
-		t.Errorf("gRPC calls = %d, want 0 (recent task should not be retried)", mock.calls)
+		t.Errorf("gRPC calls = %d, want 0 (received tasks should not be retried)", mock.calls)
+	}
+}
+
+func TestRetryStale_ResetsToReceived(t *testing.T) {
+	store := db.NewMockStore()
+	mock := &mockGRPCClient{accepted: true}
+	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+
+	now := float64(time.Now().UnixMilli()) / 1000.0
+	task, _ := store.InsertTask(context.Background(), db.InsertTaskParams{
+		Type: 3, Value: 42, State: string(models.TaskStateStale),
+		CreationTime: now, LastUpdateTime: now,
+	})
+
+	p := &Producer{
+		store:  store,
+		client: mock,
+		log:    log,
+	}
+
+	p.retryStale(context.Background())
+
+	// Task should be reset to "received" after successful retry.
+	got, _ := store.GetTask(context.Background(), task.ID)
+	if got.State != string(models.TaskStateReceived) {
+		t.Errorf("state = %q, want received after successful retry", got.State)
 	}
 }
 

@@ -228,17 +228,15 @@ func TestMockStore_CountDoneByType(t *testing.T) {
 func TestMockStore_ListStaleTasks(t *testing.T) {
 	s := NewMockStore()
 	s.InsertTask(context.Background(), InsertTaskParams{
-		Type: 1, Value: 10, State: string(models.TaskStateReceived),
-		CreationTime: 100, LastUpdateTime: 100, // old
+		Type: 1, Value: 10, State: string(models.TaskStateStale),
+		CreationTime: 100, LastUpdateTime: 100,
 	})
 	s.InsertTask(context.Background(), InsertTaskParams{
 		Type: 2, Value: 20, State: string(models.TaskStateReceived),
-		CreationTime: 9999, LastUpdateTime: 9999, // recent
+		CreationTime: 9999, LastUpdateTime: 9999,
 	})
 
-	results, err := s.ListStaleTasks(context.Background(), ListStaleTasksParams{
-		LastUpdateTime: 500, Limit: 10,
-	})
+	results, err := s.ListStaleTasks(context.Background(), 10)
 	if err != nil {
 		t.Fatalf("ListStaleTasks: %v", err)
 	}
@@ -251,14 +249,12 @@ func TestMockStore_ListStaleTasks_LimitReached(t *testing.T) {
 	s := NewMockStore()
 	for i := 0; i < 5; i++ {
 		s.InsertTask(context.Background(), InsertTaskParams{
-			Type: 1, Value: int32(i), State: string(models.TaskStateReceived),
+			Type: 1, Value: int32(i), State: string(models.TaskStateStale),
 			CreationTime: 100, LastUpdateTime: 100,
 		})
 	}
 
-	results, err := s.ListStaleTasks(context.Background(), ListStaleTasksParams{
-		LastUpdateTime: 500, Limit: 2,
-	})
+	results, err := s.ListStaleTasks(context.Background(), 2)
 	if err != nil {
 		t.Fatalf("ListStaleTasks: %v", err)
 	}
@@ -271,7 +267,7 @@ func TestMockStore_ListStaleErr(t *testing.T) {
 	s := NewMockStore()
 	s.ListStaleErr = fmt.Errorf("db down")
 
-	_, err := s.ListStaleTasks(context.Background(), ListStaleTasksParams{})
+	_, err := s.ListStaleTasks(context.Background(), 10)
 	if err == nil {
 		t.Fatal("expected error")
 	}

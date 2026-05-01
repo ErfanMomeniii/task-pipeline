@@ -39,13 +39,13 @@ func New(client pb.TaskServiceClient, store db.TaskStore, ratePerSecond, maxBack
 	}
 }
 
-// Run starts the production loop and stale task recovery. It blocks until ctx is cancelled.
+// Run starts the production loop and stale task recovery. It blocks until ctx is canceled.
 func (p *Producer) Run(ctx context.Context) error {
 	interval := time.Second / time.Duration(p.ratePerSecond)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	// Recover stale "received" tasks periodically.
+	// Recover stale tasks periodically.
 	if p.retryInterval <= 0 {
 		p.retryInterval = 10 * time.Second
 	}
@@ -72,14 +72,10 @@ func (p *Producer) Run(ctx context.Context) error {
 	}
 }
 
-// retryStale re-submits tasks stuck in "received" state for longer than 30 seconds.
+// retryStale re-submits tasks explicitly marked as "stale".
 // This handles tasks rejected by the consumer's rate limiter or lost due to transient failures.
 func (p *Producer) retryStale(ctx context.Context) {
-	cutoff := float64(time.Now().Add(-30*time.Second).UnixMilli()) / 1000.0
-	stale, err := p.store.ListStaleTasks(ctx, db.ListStaleTasksParams{
-		LastUpdateTime: cutoff,
-		Limit:          50,
-	})
+	stale, err := p.store.ListStaleTasks(ctx, 50)
 	if err != nil {
 		p.log.Error("list stale tasks failed", "error", err)
 		return
@@ -94,6 +90,14 @@ func (p *Producer) retryStale(ctx context.Context) {
 		if err != nil {
 			p.log.Warn("retry: consumer unavailable", "id", t.ID, "error", err)
 			return // consumer down, stop retrying this batch
+		}
+		if resp.Accepted {
+			// Reset to "received" so the consumer can process it normally.
+			if uerr := p.store.UpdateTaskState(ctx, db.UpdateTaskStateParams{
+				ID: t.ID, State: string(models.TaskStateReceived), LastUpdateTime: float64(time.Now().UnixMilli()) / 1000.0,
+			}); uerr != nil {
+				p.log.Error("failed to reset stale task to received", "id", t.ID, "error", uerr)
+			}
 		}
 		p.log.Info("retry: re-submitted stale task", "id", t.ID, "accepted", resp.Accepted)
 	}
@@ -132,17 +136,36 @@ func (p *Producer) produce(ctx context.Context) error {
 	metrics.TasksProduced.Inc()
 
 	// Send to consumer via gRPC (include DB ID so consumer updates same row).
-	// If consumer is unavailable, the task stays in "received" state in DB
-	// and will be re-submitted by the retryStale recovery loop.
 	resp, err := p.client.SubmitTask(ctx, &pb.TaskRequest{
 		Id:    row.ID,
 		Type:  taskType,
 		Value: taskValue,
 	})
 	if err != nil {
-		p.log.Warn("consumer unavailable, task persisted in DB",
+		// Mark as stale so retryStale can find it explicitly.
+		if uerr := p.store.UpdateTaskState(ctx, db.UpdateTaskStateParams{
+			ID: row.ID, State: string(models.TaskStateStale), LastUpdateTime: now,
+		}); uerr != nil {
+			p.log.Error("failed to mark task stale", "id", row.ID, "error", uerr)
+		}
+		p.log.Warn("consumer unavailable, task marked stale",
 			"id", row.ID,
 			"error", err,
+		)
+		return nil
+	}
+
+	if !resp.Accepted {
+		// Consumer rejected (e.g. rate limit) — mark stale for retry.
+		if uerr := p.store.UpdateTaskState(ctx, db.UpdateTaskStateParams{
+			ID: row.ID, State: string(models.TaskStateStale), LastUpdateTime: float64(time.Now().UnixMilli()) / 1000.0,
+		}); uerr != nil {
+			p.log.Error("failed to mark task stale", "id", row.ID, "error", uerr)
+		}
+		p.log.Info("task rejected by consumer, marked stale",
+			"id", row.ID,
+			"type", taskType,
+			"value", taskValue,
 		)
 		return nil
 	}
@@ -151,7 +174,6 @@ func (p *Producer) produce(ctx context.Context) error {
 		"id", row.ID,
 		"type", taskType,
 		"value", taskValue,
-		"accepted", resp.Accepted,
 	)
 
 	return nil

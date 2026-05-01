@@ -7,8 +7,6 @@ package db
 import (
 	"database/sql/driver"
 	"fmt"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type TaskState string
@@ -17,6 +15,7 @@ const (
 	TaskStateReceived   TaskState = "received"
 	TaskStateProcessing TaskState = "processing"
 	TaskStateDone       TaskState = "done"
+	TaskStateStale      TaskState = "stale"
 )
 
 func (e *TaskState) Scan(src interface{}) error {
@@ -55,11 +54,10 @@ func (ns NullTaskState) Value() (driver.Value, error) {
 }
 
 type Task struct {
-	ID             int64       `json:"id"`
-	Type           int32       `json:"type"`
-	Value          int32       `json:"value"`
-	State          string      `json:"state"`
-	CreationTime   float64     `json:"creation_time"`
-	LastUpdateTime float64     `json:"last_update_time"`
-	Comment        pgtype.Text `json:"comment"`
+	ID             int64   `json:"id"`
+	Type           int32   `json:"type"`
+	Value          int32   `json:"value"`
+	State          string  `json:"state"`
+	CreationTime   float64 `json:"creation_time"`
+	LastUpdateTime float64 `json:"last_update_time"`
 }

@@ -1,7 +1,7 @@
 -- name: InsertTask :one
 INSERT INTO tasks (type, value, state, creation_time, last_update_time)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, type, value, state, creation_time, last_update_time, comment;
+RETURNING id, type, value, state, creation_time, last_update_time;
 
 -- name: UpdateTaskState :exec
 UPDATE tasks
@@ -9,7 +9,7 @@ SET state = $2, last_update_time = $3
 WHERE id = $1;
 
 -- name: GetTask :one
-SELECT id, type, value, state, creation_time, last_update_time, comment
+SELECT id, type, value, state, creation_time, last_update_time
 FROM tasks
 WHERE id = $1;
 
@@ -30,6 +30,6 @@ SELECT COUNT(*) FROM tasks WHERE state != 'done';
 -- name: ListStaleTasks :many
 SELECT id, type, value, state, creation_time, last_update_time
 FROM tasks
-WHERE state = 'received' AND last_update_time < $1
+WHERE state = 'stale'
 ORDER BY id
-LIMIT $2;
+LIMIT $1;

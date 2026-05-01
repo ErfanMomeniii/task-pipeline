@@ -43,7 +43,7 @@ func (q *Queries) CountUnprocessed(ctx context.Context) (int64, error) {
 }
 
 const getTask = `-- name: GetTask :one
-SELECT id, type, value, state, creation_time, last_update_time, comment
+SELECT id, type, value, state, creation_time, last_update_time
 FROM tasks
 WHERE id = $1
 `
@@ -58,7 +58,6 @@ func (q *Queries) GetTask(ctx context.Context, id int64) (Task, error) {
 		&i.State,
 		&i.CreationTime,
 		&i.LastUpdateTime,
-		&i.Comment,
 	)
 	return i, err
 }
@@ -66,7 +65,7 @@ func (q *Queries) GetTask(ctx context.Context, id int64) (Task, error) {
 const insertTask = `-- name: InsertTask :one
 INSERT INTO tasks (type, value, state, creation_time, last_update_time)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, type, value, state, creation_time, last_update_time, comment
+RETURNING id, type, value, state, creation_time, last_update_time
 `
 
 type InsertTaskParams struct {
@@ -93,7 +92,6 @@ func (q *Queries) InsertTask(ctx context.Context, arg InsertTaskParams) (Task, e
 		&i.State,
 		&i.CreationTime,
 		&i.LastUpdateTime,
-		&i.Comment,
 	)
 	return i, err
 }
@@ -101,34 +99,20 @@ func (q *Queries) InsertTask(ctx context.Context, arg InsertTaskParams) (Task, e
 const listStaleTasks = `-- name: ListStaleTasks :many
 SELECT id, type, value, state, creation_time, last_update_time
 FROM tasks
-WHERE state = 'received' AND last_update_time < $1
+WHERE state = 'stale'
 ORDER BY id
-LIMIT $2
+LIMIT $1
 `
 
-type ListStaleTasksParams struct {
-	LastUpdateTime float64 `json:"last_update_time"`
-	Limit          int32   `json:"limit"`
-}
-
-type ListStaleTasksRow struct {
-	ID             int64   `json:"id"`
-	Type           int32   `json:"type"`
-	Value          int32   `json:"value"`
-	State          string  `json:"state"`
-	CreationTime   float64 `json:"creation_time"`
-	LastUpdateTime float64 `json:"last_update_time"`
-}
-
-func (q *Queries) ListStaleTasks(ctx context.Context, arg ListStaleTasksParams) ([]ListStaleTasksRow, error) {
-	rows, err := q.db.Query(ctx, listStaleTasks, arg.LastUpdateTime, arg.Limit)
+func (q *Queries) ListStaleTasks(ctx context.Context, limit int32) ([]Task, error) {
+	rows, err := q.db.Query(ctx, listStaleTasks, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListStaleTasksRow
+	var items []Task
 	for rows.Next() {
-		var i ListStaleTasksRow
+		var i Task
 		if err := rows.Scan(
 			&i.ID,
 			&i.Type,

@@ -1,4 +1,4 @@
-CREATE TYPE task_state AS ENUM ('received', 'processing', 'done');
+CREATE TYPE task_state AS ENUM ('received', 'processing', 'done', 'stale');
 
 CREATE TABLE tasks (
     id              BIGSERIAL PRIMARY KEY,

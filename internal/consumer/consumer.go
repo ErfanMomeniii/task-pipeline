@@ -154,6 +154,7 @@ func (c *Consumer) StartStateTracker(ctx context.Context, interval time.Duration
 				string(models.TaskStateReceived),
 				string(models.TaskStateProcessing),
 				string(models.TaskStateDone),
+				string(models.TaskStateStale),
 			} {
 				count, err := c.store.CountTasksByState(ctx, state)
 				if err != nil {

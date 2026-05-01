@@ -5,27 +5,27 @@ Two Go microservices (producer/consumer) communicating via gRPC, with PostgreSQL
 ## Architecture
 
 ```
-┌──────────┐    gRPC     ┌──────────┐
-│ Producer │────────────▶│ Consumer │
-│          │  SubmitTask │          │
-└────┬─────┘             └────┬─────┘
-     │                        │
-     │   ┌──────────────┐     │
-     └──▶│  PostgreSQL  │◀────┘
-         │  (tasks DB)  │
-         └──────────────┘
-              ▲
-     ┌────────┴────────┐
-     │   Prometheus    │
-     └────────┬────────┘
-              ▼
-     ┌─────────────────┐
-     │     Grafana     │
-     │  (4 dashboards) │
-     └─────────────────┘
+                                    ┌──────────┐    gRPC     ┌──────────┐
+                                    │ Producer │────────────▶│ Consumer │
+                                    │          │  SubmitTask │          │
+                                    └────┬─────┘             └────┬─────┘
+                                         │                        │
+                                         │   ┌──────────────┐     │
+                                         └──▶│  PostgreSQL  │◀────┘
+                                             │  (tasks DB)  │
+                                             └──────────────┘
+                                                     ▲
+                                            ┌────────┴────────┐
+                                            │   Prometheus    │
+                                            └────────┬────────┘
+                                                     ▼
+                                            ┌─────────────────┐
+                                            │     Grafana     │
+                                            │  (4 dashboards) │
+                                            └─────────────────┘
 ```
 
-**Producer** generates tasks with random `type` (0–9) and `value` (0–99), persists them in PostgreSQL with state `received`, and sends them to the consumer via gRPC. Respects a configurable `max_backlog` limit — stops producing when unprocessed tasks reach the threshold. Includes a stale task recovery loop that re-submits tasks stuck in `received` state for longer than 30 seconds.
+**Producer** generates tasks with random `type` (0–9) and `value` (0–99), persists them in PostgreSQL with state `received`, and sends them to the consumer via gRPC. Respects a configurable `max_backlog` limit — stops producing when unprocessed tasks reach the threshold. When gRPC fails or the consumer rejects a task, the producer marks it as `stale`. A periodic recovery loop re-submits `stale` tasks and resets them to `received` on success.
 
 **Consumer** receives tasks via gRPC, transitions state to `processing`, sleeps for `value` milliseconds (simulating work), then marks `done`. Implements a token-bucket rate limiter with proportional refill (configurable tasks per time period). Bounds concurrency via a buffered-channel semaphore (`max_workers`). For each completed task, logs the task content and the cumulative value sum for that task's type.
 
@@ -127,6 +127,7 @@ task-pipeline/
 │   ├── producer/main.go         # Producer entry point (flag-based CLI)
 │   └── consumer/main.go         # Consumer entry point (flag-based CLI)
 ├── internal/
+│   ├── app/                     # Shared resource setup (DB, gRPC, metrics, pprof)
 │   ├── config/                  # Shared Viper config loading (embedded defaults + YAML + env)
 │   ├── db/                      # Shared persistence (sqlc generated + connection + migrations)
 │   ├── models/                  # Domain types (TaskState constants)
@@ -136,10 +137,12 @@ task-pipeline/
 │   └── consumer/                # Consumer logic (gRPC handler, rate limiter, worker pool)
 ├── proto/                       # gRPC protobuf definitions + generated Go code
 ├── migrations/                  # gomigrate SQL files (embedded via embed package)
+├── scripts/                     # Demo scripts (GOGC benchmarking)
 ├── deploy/
-│   ├── docker-compose.yml       # Full stack: postgres, producer, consumer, prometheus, grafana
 │   ├── prometheus.yml           # Prometheus scrape config
+│   ├── helm/                    # Helm chart for Kind deployment
 │   └── grafana/                 # Dashboard JSON provisioning (4 dashboards)
+├── docker-compose.yml           # Full stack: postgres, producer, consumer, prometheus, grafana
 ├── Makefile                     # Build, test, lint, coverage, proto, migrate, docker targets
 ├── Dockerfile.producer          # Multi-stage build for producer
 ├── Dockerfile.consumer          # Multi-stage build for consumer
@@ -184,14 +187,11 @@ Migrations are embedded in the binary via Go's `embed` package and run automatic
 # Apply all pending migrations (while services are running)
 make migrate-up
 
-# Rollback the last migration (removes "comment" column)
+# Rollback the last migration
 make migrate-down
-
-# Rollback multiple steps
-make migrate-down MIGRATE_STEPS=2
 ```
 
-Migration `000001` creates the `tasks` table with a `task_state` enum. Migration `000002` adds/removes a `comment` column — designed for demonstrating live migration up/down while services are running.
+Migration `000001` creates the `tasks` table with a `task_state` enum (`received`, `processing`, `done`, `stale`).
 
 ## Profiling
 
@@ -293,7 +293,7 @@ make bench      # Run benchmarks
 
 Four dashboards are auto-provisioned:
 
-1. **Messages per State** — received, processing, and done task counts over time
+1. **Messages per State** — received, processing, done, and stale task counts over time
 2. **Service Health** — producer/consumer up/down status + producer backlog gauge
 3. **Value Sum per Type** — total sum of `value` field for each task type (0–9)
 4. **Tasks per Type** — total processed tasks per task type (0–9)
