@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -43,8 +44,8 @@ func TestRun_ContextCancellation(t *testing.T) {
 	defer cancel()
 
 	err := p.Run(ctx)
-	if !isContextErr(err) {
-		t.Errorf("Run() returned %v, want context error", err)
+	if err != nil {
+		t.Errorf("Run() returned %v, want nil on context cancellation", err)
 	}
 }
 
@@ -84,8 +85,8 @@ func TestProduce_InsertsAndSends(t *testing.T) {
 	}
 
 	// Should have called gRPC.
-	if mock.calls != 1 {
-		t.Errorf("gRPC calls = %d, want 1", mock.calls)
+	if mock.calls.Load() != 1 {
+		t.Errorf("gRPC calls = %d, want 1", mock.calls.Load())
 	}
 }
 
@@ -116,8 +117,8 @@ func TestProduce_BacklogLimitReached(t *testing.T) {
 	}
 
 	// Should NOT have produced a new task.
-	if mock.calls != 0 {
-		t.Errorf("gRPC calls = %d, want 0 (backlog full)", mock.calls)
+	if mock.calls.Load() != 0 {
+		t.Errorf("gRPC calls = %d, want 0 (backlog full)", mock.calls.Load())
 	}
 
 	// Store should still have only 5 tasks.
@@ -183,8 +184,8 @@ func TestProduce_ConsumerRejects_TaskMarkedStale(t *testing.T) {
 	}
 
 	// gRPC was called.
-	if mock.calls != 1 {
-		t.Errorf("gRPC calls = %d, want 1", mock.calls)
+	if mock.calls.Load() != 1 {
+		t.Errorf("gRPC calls = %d, want 1", mock.calls.Load())
 	}
 }
 
@@ -223,8 +224,8 @@ func TestProduce_InsertTaskFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("produce should return error when InsertTask fails")
 	}
-	if mock.calls != 0 {
-		t.Errorf("gRPC calls = %d, want 0 (should not send after insert failure)", mock.calls)
+	if mock.calls.Load() != 0 {
+		t.Errorf("gRPC calls = %d, want 0 (should not send after insert failure)", mock.calls.Load())
 	}
 }
 
@@ -254,7 +255,7 @@ func TestRun_RetryTickerFires(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 
 	// Insert stale task.
-	now := float64(time.Now().UnixMilli()) / 1000.0
+	now := models.NowUnixSec()
 	store.InsertTask(context.Background(), db.InsertTaskParams{
 		Type: 1, Value: 10, State: string(models.TaskStateStale),
 		CreationTime: now, LastUpdateTime: now,
@@ -275,8 +276,8 @@ func TestRun_RetryTickerFires(t *testing.T) {
 	_ = p.Run(ctx)
 
 	// retryStale should have fired and re-submitted the stale task.
-	if mock.calls < 1 {
-		t.Errorf("gRPC calls = %d, want >= 1 (retryStale should have fired)", mock.calls)
+	if mock.calls.Load() < 1 {
+		t.Errorf("gRPC calls = %d, want >= 1 (retryStale should have fired)", mock.calls.Load())
 	}
 }
 
@@ -297,8 +298,8 @@ func TestRun_ProduceError(t *testing.T) {
 	defer cancel()
 
 	err := p.Run(ctx)
-	if !isContextErr(err) {
-		t.Errorf("Run() returned %v, want context error", err)
+	if err != nil {
+		t.Errorf("Run() returned %v, want nil on context cancellation", err)
 	}
 }
 
@@ -317,8 +318,8 @@ func TestRetryStale_ListStaleError(t *testing.T) {
 	// Should not panic, just log the error.
 	p.retryStale(context.Background())
 
-	if mock.calls != 0 {
-		t.Errorf("gRPC calls = %d, want 0", mock.calls)
+	if mock.calls.Load() != 0 {
+		t.Errorf("gRPC calls = %d, want 0", mock.calls.Load())
 	}
 }
 
@@ -327,7 +328,7 @@ func TestRetryStale_SubmitTaskError(t *testing.T) {
 	mock := &mockGRPCClient{err: fmt.Errorf("connection refused")}
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 
-	now := float64(time.Now().UnixMilli()) / 1000.0
+	now := models.NowUnixSec()
 	store.InsertTask(context.Background(), db.InsertTaskParams{
 		Type: 1, Value: 10, State: string(models.TaskStateStale),
 		CreationTime: now, LastUpdateTime: now,
@@ -342,8 +343,8 @@ func TestRetryStale_SubmitTaskError(t *testing.T) {
 	// Should not panic — logs warning and stops batch.
 	p.retryStale(context.Background())
 
-	if mock.calls != 1 {
-		t.Errorf("gRPC calls = %d, want 1 (attempted then stopped)", mock.calls)
+	if mock.calls.Load() != 1 {
+		t.Errorf("gRPC calls = %d, want 1 (attempted then stopped)", mock.calls.Load())
 	}
 }
 
@@ -353,7 +354,7 @@ func TestRetryStale_ResubmitsStaleTasks(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 
 	// Insert a task with "stale" state.
-	now := float64(time.Now().UnixMilli()) / 1000.0
+	now := models.NowUnixSec()
 	store.InsertTask(context.Background(), db.InsertTaskParams{
 		Type: 3, Value: 42, State: string(models.TaskStateStale),
 		CreationTime: now, LastUpdateTime: now,
@@ -367,8 +368,8 @@ func TestRetryStale_ResubmitsStaleTasks(t *testing.T) {
 
 	p.retryStale(context.Background())
 
-	if mock.calls != 1 {
-		t.Errorf("gRPC calls = %d, want 1 (stale task re-submitted)", mock.calls)
+	if mock.calls.Load() != 1 {
+		t.Errorf("gRPC calls = %d, want 1 (stale task re-submitted)", mock.calls.Load())
 	}
 }
 
@@ -378,7 +379,7 @@ func TestRetryStale_IgnoresReceivedTasks(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 
 	// Insert a task in "received" state — should NOT be retried (only "stale" tasks are retried).
-	now := float64(time.Now().UnixMilli()) / 1000.0
+	now := models.NowUnixSec()
 	store.InsertTask(context.Background(), db.InsertTaskParams{
 		Type: 3, Value: 42, State: string(models.TaskStateReceived),
 		CreationTime: now, LastUpdateTime: now,
@@ -392,8 +393,8 @@ func TestRetryStale_IgnoresReceivedTasks(t *testing.T) {
 
 	p.retryStale(context.Background())
 
-	if mock.calls != 0 {
-		t.Errorf("gRPC calls = %d, want 0 (received tasks should not be retried)", mock.calls)
+	if mock.calls.Load() != 0 {
+		t.Errorf("gRPC calls = %d, want 0 (received tasks should not be retried)", mock.calls.Load())
 	}
 }
 
@@ -402,7 +403,7 @@ func TestRetryStale_ResetsToReceived(t *testing.T) {
 	mock := &mockGRPCClient{accepted: true}
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 
-	now := float64(time.Now().UnixMilli()) / 1000.0
+	now := models.NowUnixSec()
 	task, _ := store.InsertTask(context.Background(), db.InsertTaskParams{
 		Type: 3, Value: 42, State: string(models.TaskStateStale),
 		CreationTime: now, LastUpdateTime: now,
@@ -445,20 +446,17 @@ func BenchmarkProduce(b *testing.B) {
 }
 
 // mockGRPCClient implements pb.TaskServiceClient for testing.
+// calls uses atomic.Int32 for thread safety in concurrent tests.
 type mockGRPCClient struct {
 	accepted bool
 	err      error
-	calls    int
+	calls    atomic.Int32
 }
 
 func (m *mockGRPCClient) SubmitTask(_ context.Context, _ *pb.TaskRequest, _ ...grpc.CallOption) (*pb.TaskResponse, error) {
-	m.calls++
+	m.calls.Add(1)
 	if m.err != nil {
 		return nil, m.err
 	}
 	return &pb.TaskResponse{Accepted: m.accepted}, nil
-}
-
-func isContextErr(err error) bool {
-	return err == context.Canceled || err == context.DeadlineExceeded
 }

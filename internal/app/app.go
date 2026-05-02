@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -88,10 +89,19 @@ func (a *App) WithMetrics(port int) {
 }
 
 // WithPprof starts a pprof HTTP server on the given port.
+// Uses a dedicated ServeMux with explicitly registered handlers instead of
+// relying on the DefaultServeMux via blank import, avoiding global side effects.
 func (a *App) WithPprof(port int) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+
 	pprofAddr := fmt.Sprintf(":%d", port)
 	a.Log.Info("starting pprof server", "addr", pprofAddr)
-	a.pprofSrv = &http.Server{Addr: pprofAddr, Handler: nil}
+	a.pprofSrv = &http.Server{Addr: pprofAddr, Handler: mux}
 	go func() {
 		if err := a.pprofSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			a.Log.Error("pprof server error", "error", err)
@@ -151,13 +161,19 @@ func (a *App) Shutdown(timeout time.Duration) {
 	defer cancel()
 
 	if a.metricsSrv != nil {
-		a.metricsSrv.Shutdown(ctx)
+		if err := a.metricsSrv.Shutdown(ctx); err != nil {
+			a.Log.Error("metrics server shutdown error", "error", err)
+		}
 	}
 	if a.pprofSrv != nil {
-		a.pprofSrv.Shutdown(ctx)
+		if err := a.pprofSrv.Shutdown(ctx); err != nil {
+			a.Log.Error("pprof server shutdown error", "error", err)
+		}
 	}
 	if a.grpcConn != nil {
-		a.grpcConn.Close()
+		if err := a.grpcConn.Close(); err != nil {
+			a.Log.Error("grpc client close error", "error", err)
+		}
 	}
 	if a.Pool != nil {
 		a.Pool.Close()

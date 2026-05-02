@@ -41,6 +41,9 @@ func New(store db.TaskStore, rateLimit, ratePeriodMs, maxWorkers int, log *slog.
 	if maxWorkers <= 0 {
 		maxWorkers = rateLimit // sensible default: match rate limit
 	}
+	if ratePeriodMs <= 0 {
+		ratePeriodMs = 1000 // default to 1 second
+	}
 	return &Consumer{
 		store:        store,
 		log:          log,
@@ -69,27 +72,26 @@ func (c *Consumer) SubmitTask(ctx context.Context, req *pb.TaskRequest) (*pb.Tas
 
 	// Process asynchronously so gRPC response returns quickly.
 	// Semaphore bounds concurrency; WaitGroup ensures graceful shutdown.
+	// Use context.WithoutCancel to prevent gRPC request context cancellation
+	// from aborting DB calls in the background goroutine.
+	asyncCtx := context.WithoutCancel(ctx)
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
 		c.sem <- struct{}{}        // acquire worker slot
 		defer func() { <-c.sem }() // release worker slot
-		c.process(ctx, req.Id, req.Type, req.Value)
+		c.process(asyncCtx, req.Id, req.Type, req.Value)
 	}()
 
 	return &pb.TaskResponse{Accepted: true}, nil
 }
 
 func (c *Consumer) process(ctx context.Context, id int64, taskType, taskValue int32) {
-	now := func() float64 {
-		return float64(time.Now().UnixMilli()) / 1000.0
-	}
-
 	// Set state to "processing".
 	if err := c.store.UpdateTaskState(ctx, db.UpdateTaskStateParams{
 		ID:             id,
 		State:          string(models.TaskStateProcessing),
-		LastUpdateTime: now(),
+		LastUpdateTime: models.NowUnixSec(),
 	}); err != nil {
 		c.log.Error("update to processing failed", "id", id, "error", err)
 		return
@@ -104,7 +106,7 @@ func (c *Consumer) process(ctx context.Context, id int64, taskType, taskValue in
 	if err := c.store.UpdateTaskState(ctx, db.UpdateTaskStateParams{
 		ID:             id,
 		State:          string(models.TaskStateDone),
-		LastUpdateTime: now(),
+		LastUpdateTime: models.NowUnixSec(),
 	}); err != nil {
 		c.log.Error("update to done failed", "id", id, "error", err)
 		return

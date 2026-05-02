@@ -433,6 +433,15 @@ func TestNew(t *testing.T) {
 	}
 }
 
+func TestNew_DefaultRatePeriodMs(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	c := New(db.NewMockStore(), 5, 0, 10, log) // ratePeriodMs=0 → defaults to 1000
+
+	if c.ratePeriodMs != 1000 {
+		t.Errorf("ratePeriodMs = %d, want 1000 (default)", c.ratePeriodMs)
+	}
+}
+
 func TestNew_DefaultMaxWorkers(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 	c := New(db.NewMockStore(), 5, 2000, 0, log) // maxWorkers=0 → defaults to rateLimit

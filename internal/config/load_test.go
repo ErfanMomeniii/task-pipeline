@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -91,6 +92,49 @@ func TestLoad_InvalidFilePath(t *testing.T) {
 	if err == nil {
 		t.Fatal("Load with invalid path should return error")
 	}
+}
+
+func TestLoad_ValidationFailure(t *testing.T) {
+	content := []byte(`
+db:
+  host: "localhost"
+  port: 0
+grpc:
+  port: 50051
+producer:
+  prometheus_port: 9090
+  pprof_port: 6060
+  rate_per_second: 0
+  max_backlog: 100
+consumer:
+  prometheus_port: 9091
+  pprof_port: 6061
+  rate_limit: 10
+  rate_period_ms: 1000
+`)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("Load should fail with invalid port and rate")
+	}
+
+	// Should report both the port and rate errors.
+	errStr := err.Error()
+	if !contains(errStr, "db.port") {
+		t.Errorf("error should mention db.port, got: %v", err)
+	}
+	if !contains(errStr, "rate_per_second") {
+		t.Errorf("error should mention rate_per_second, got: %v", err)
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && strings.Contains(s, substr)
 }
 
 func TestLoad_EnvOverride(t *testing.T) {

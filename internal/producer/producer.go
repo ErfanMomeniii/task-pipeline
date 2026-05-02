@@ -61,7 +61,7 @@ func (p *Producer) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			p.log.Info("producer loop stopped")
-			return ctx.Err()
+			return nil
 		case <-ticker.C:
 			if err := p.produce(ctx); err != nil {
 				p.log.Error("produce failed", "error", err)
@@ -94,7 +94,7 @@ func (p *Producer) retryStale(ctx context.Context) {
 		if resp.Accepted {
 			// Reset to "received" so the consumer can process it normally.
 			if uerr := p.store.UpdateTaskState(ctx, db.UpdateTaskStateParams{
-				ID: t.ID, State: string(models.TaskStateReceived), LastUpdateTime: float64(time.Now().UnixMilli()) / 1000.0,
+				ID: t.ID, State: string(models.TaskStateReceived), LastUpdateTime: models.NowUnixSec(),
 			}); uerr != nil {
 				p.log.Error("failed to reset stale task to received", "id", t.ID, "error", uerr)
 			}
@@ -119,7 +119,7 @@ func (p *Producer) produce(ctx context.Context) error {
 	// Generate random task.
 	taskType := int32(rand.IntN(10))
 	taskValue := int32(rand.IntN(100))
-	now := float64(time.Now().UnixMilli()) / 1000.0
+	now := models.NowUnixSec()
 
 	// Persist task with "received" state.
 	row, err := p.store.InsertTask(ctx, db.InsertTaskParams{
@@ -142,12 +142,7 @@ func (p *Producer) produce(ctx context.Context) error {
 		Value: taskValue,
 	})
 	if err != nil {
-		// Mark as stale so retryStale can find it explicitly.
-		if uerr := p.store.UpdateTaskState(ctx, db.UpdateTaskStateParams{
-			ID: row.ID, State: string(models.TaskStateStale), LastUpdateTime: now,
-		}); uerr != nil {
-			p.log.Error("failed to mark task stale", "id", row.ID, "error", uerr)
-		}
+		p.markStale(ctx, row.ID)
 		p.log.Warn("consumer unavailable, task marked stale",
 			"id", row.ID,
 			"error", err,
@@ -156,12 +151,7 @@ func (p *Producer) produce(ctx context.Context) error {
 	}
 
 	if !resp.Accepted {
-		// Consumer rejected (e.g. rate limit) — mark stale for retry.
-		if uerr := p.store.UpdateTaskState(ctx, db.UpdateTaskStateParams{
-			ID: row.ID, State: string(models.TaskStateStale), LastUpdateTime: float64(time.Now().UnixMilli()) / 1000.0,
-		}); uerr != nil {
-			p.log.Error("failed to mark task stale", "id", row.ID, "error", uerr)
-		}
+		p.markStale(ctx, row.ID)
 		p.log.Info("task rejected by consumer, marked stale",
 			"id", row.ID,
 			"type", taskType,
@@ -177,4 +167,16 @@ func (p *Producer) produce(ctx context.Context) error {
 	)
 
 	return nil
+}
+
+// markStale transitions a task to the "stale" state so retryStale can
+// re-submit it later.
+func (p *Producer) markStale(ctx context.Context, id int64) {
+	if err := p.store.UpdateTaskState(ctx, db.UpdateTaskStateParams{
+		ID:             id,
+		State:          string(models.TaskStateStale),
+		LastUpdateTime: models.NowUnixSec(),
+	}); err != nil {
+		p.log.Error("failed to mark task stale", "id", id, "error", err)
+	}
 }
